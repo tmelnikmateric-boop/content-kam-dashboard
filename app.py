@@ -21,13 +21,12 @@ COLUMNS = [
     'ID', 'Внешний код', 'Группа 3', 'Наименование',
     'Статус', 'Исполнитель', 'Дата взятия', 
     'Дата выполнения', 'Дата завершения работы', 
-    'Источник', 'Дата загрузки'
+    'Причина паузы', 'Источник', 'Дата загрузки'
 ]
 
 @st.cache_resource
 def get_gspread_client():
     scopes = ["https://www.googleapis.com/auth/spreadsheets"]
-    # Авторизация через Secrets в Streamlit Cloud
     creds_dict = dict(st.secrets["gcp_service_account"])
     creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
     return gspread.authorize(creds)
@@ -118,7 +117,7 @@ def build_summary(df):
         elif is_paused:
             done_cnt, in_work_cnt, new_cnt, group_status = 0, 0, total, '⏸️ На паузе'
         elif is_in_work:
-            done_cnt, in_work_cnt, new_cnt, group_status = 0, total, 0, '⏳ В работе'
+            done_cnt, in_work_cnt, new_cnt, group_status = 0, total, 0, '🔄 В работе'
         else:
             done_cnt, in_work_cnt, new_cnt, group_status = 0, 0, total, '🆕 Новая'
 
@@ -131,6 +130,7 @@ def build_summary(df):
             'В работе': in_work_cnt,
             'Выполнено': done_cnt,
             'Статус группы': group_status,
+            'Причина паузы': pause_reason,
             'Исполнитель': first_row.get('Исполнитель', ''),
             'Дата взятия': date_take,
             'Дата завершения работы': date_done,
@@ -140,7 +140,115 @@ def build_summary(df):
     return pd.DataFrame(summary_rows)
 
 # ==========================================
-# 3. ВЕБ-ИНТЕРФЕЙС (STREAMLIT)
+# 3. МОДАЛЬНЫЕ ОКНА (DIALOGS)
+# ==========================================
+
+@st.dialog("▶️ Взять файлы в работу")
+def modal_take_in_work(sheet_name, summary_df, df):
+    # Фильтруем файлы со статусом "🆕 Новая"
+    new_files = summary_df[summary_df['Статус группы'] == '🆕 Новая']['Имя файла'].tolist()
+
+    if not new_files:
+        st.info("Нет новых файлов для взятия в работу.")
+        return
+
+    st.write("Выберите файлы:")
+    selected_files = []
+    for filename in new_files:
+        if st.checkbox(filename, key=f"chk_new_{filename}"):
+            selected_files.append(filename)
+
+    executor_name = st.text_input("Имя исполнителя:")
+
+    if st.button("В работу"):
+        if not selected_files:
+            st.warning("Отметьте хотя бы один файл!")
+        elif not executor_name.strip():
+            st.warning("Укажите имя исполнителя!")
+        else:
+            source_col = 'Имя файла' if 'Имя файла' in df.columns else 'Источник'
+            now_str = datetime.datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+            mask = df[source_col].isin(selected_files)
+
+            df.loc[mask, 'Статус'] = 'В работе'
+            df.loc[mask, 'Статус группы'] = '🔄 В работе'
+            df.loc[mask, 'Исполнитель'] = executor_name.strip()
+            df.loc[mask, 'Дата взятия'] = now_str
+            df.loc[mask, 'Причина паузы'] = ''
+
+            if save_dept_data(sheet_name, df):
+                st.success("Статус обновлен на '🔄 В работе'")
+                st.rerun()
+
+@st.dialog("⏸️ Поставить файлы на паузу")
+def modal_pause(sheet_name, summary_df, df):
+    # Фильтруем файлы со статусом "🔄 В работе"
+    in_work_files = summary_df[summary_df['Статус группы'] == '🔄 В работе']['Имя файла'].tolist()
+
+    if not in_work_files:
+        st.info("Нет файлов в работе для отправки на паузу.")
+        return
+
+    st.write("Выберите файлы:")
+    selected_files = []
+    for filename in in_work_files:
+        if st.checkbox(filename, key=f"chk_work_{filename}"):
+            selected_files.append(filename)
+
+    pause_reason = st.selectbox(
+        "Укажите причину паузы:",
+        options=["информация уточняется", "запрошено у поставщика"]
+    )
+
+    if st.button("Поставить на паузу"):
+        if not selected_files:
+            st.warning("Отметьте хотя бы один файл!")
+        else:
+            source_col = 'Имя файла' if 'Имя файла' in df.columns else 'Источник'
+            mask = df[source_col].isin(selected_files)
+
+            df.loc[mask, 'Статус'] = 'Пауза'
+            df.loc[mask, 'Статус группы'] = '⏸️ На паузе'
+            df.loc[mask, 'Причина паузы'] = pause_reason
+
+            if save_dept_data(sheet_name, df):
+                st.success("Файлы переведены на паузу!")
+                st.rerun()
+
+@st.dialog("✅ Завершить работу по файлам")
+def modal_complete(sheet_name, summary_df, df):
+    # Исключаем уже завершенные
+    active_files = summary_df[summary_df['Статус группы'] != '✅ Завершена']['Имя файла'].tolist()
+
+    if not active_files:
+        st.info("Нет активных файлов для завершения.")
+        return
+
+    st.write("Выберите файлы для завершения:")
+    selected_files = []
+    for filename in active_files:
+        if st.checkbox(filename, key=f"chk_comp_{filename}"):
+            selected_files.append(filename)
+
+    if st.button("Завершить"):
+        if not selected_files:
+            st.warning("Отметьте хотя бы один файл!")
+        else:
+            source_col = 'Имя файла' if 'Имя файла' in df.columns else 'Источник'
+            now_str = datetime.datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+            mask = df[source_col].isin(selected_files)
+
+            df.loc[mask, 'Статус'] = 'выполнено'
+            df.loc[mask, 'Статус группы'] = '✅ Завершена'
+            df.loc[mask, 'Дата завершения работы'] = now_str
+            df.loc[mask, 'Дата выполнения'] = now_str
+
+            if save_dept_data(sheet_name, df):
+                st.success("Статус обновлен на 'Выполнено'")
+                st.rerun()
+
+# ==========================================
+# 4. ОСНОВНОЙ ИНТЕРФЕЙС STREAMLIT
 # ==========================================
 st.title("📊 Панель управления Контентом и КАМ")
 
@@ -149,10 +257,11 @@ sheet_name = SHEET_MAP[dept]
 
 # Загружаем текущие данные
 df = load_dept_data(sheet_name)
+summary_df = build_summary(df)
 
-col_left, col_right = st.columns([1, 2])
+col_upload, col_actions = st.columns([1, 2])
 
-with col_left:
+with col_upload:
     st.subheader("1. Загрузка Excel")
     uploaded_file = st.file_uploader("Выберите .xlsx / .xls файл", type=['xlsx', 'xls'])
     if uploaded_file is not None:
@@ -164,7 +273,7 @@ with col_left:
             uploaded_df['Источник'] = uploaded_file.name
             uploaded_df['Дата добавления файла'] = now_str
             uploaded_df['Статус'] = 'Новый'
-            uploaded_df['Статус группы'] = 'Новая'
+            uploaded_df['Статус группы'] = '🆕 Новая'
 
             for col in COLUMNS:
                 if col not in uploaded_df.columns:
@@ -175,77 +284,32 @@ with col_left:
                 st.success(f"Файл '{uploaded_file.name}' успешно сохранен!")
                 st.rerun()
 
-with col_right:
-    st.subheader("2. Фильтр и управление статусами")
-    source_col = 'Имя файла' if 'Имя файла' in df.columns else 'Источник'
+with col_actions:
+    st.subheader("2. Управление статусами")
+    st.write("Нажмите на кнопку действия для выбора файлов:")
     
-    # Считаем сводные данные, чтобы точно знать статус каждой группы файлов
-    summary_df = build_summary(df)
-
-    if not summary_df.empty:
-        # Оставляем в списке выбора только те файлы, у которых статус НЕ '✅ Завершена'
-        active_files_df = summary_df[summary_df['Статус группы'] != '✅ Завершена']
-        available_files = active_files_df['Имя файла'].tolist()
-    else:
-        available_files = []
-    
-    selected_files = st.multiselect("Выберите файл(ы) для работы:", options=available_files)
-    executor_name = st.text_input("Имя исполнителя:")
-
     btn_col1, btn_col2, btn_col3 = st.columns(3)
 
-    now_str = datetime.datetime.now().strftime("%d.%m.%Y %H:%M:%S")
-    mask = df[source_col].isin(selected_files) if source_col in df.columns else []
+    if btn_col1.button("▶️ Взять в работу", use_container_width=True):
+        modal_take_in_work(sheet_name, summary_df, df)
 
-    if btn_col1.button("▶️ Взять в работу"):
-        if not selected_files:
-            st.warning("Выберите файлы!")
-        elif not executor_name.strip():
-            st.warning("Укажите имя исполнителя!")
-        else:
-            df.loc[mask, 'Статус'] = 'В работе'
-            df.loc[mask, 'Статус группы'] = '⏳ В работе'
-            df.loc[mask, 'Исполнитель'] = executor_name.strip()
-            df.loc[mask, 'Дата взятия'] = now_str
-            save_dept_data(sheet_name, df)
-            st.success("Статус обновлен на 'В работе'")
-            st.rerun()
+    if btn_col2.button("⏸️ На паузу", use_container_width=True):
+        modal_pause(sheet_name, summary_df, df)
 
-    if btn_col2.button("⏸️ На паузу"):
-        if not selected_files:
-            st.warning("Выберите файлы!")
-        else:
-            df.loc[mask, 'Статус'] = 'Пауза'
-            df.loc[mask, 'Статус группы'] = '⏸️ На паузе'
-            save_dept_data(sheet_name, df)
-            st.success("Статус обновлен на 'На паузе'")
-            st.rerun()
-
-    if btn_col3.button("✅ Завершить"):
-        if not selected_files:
-            st.warning("Выберите файлы!")
-        else:
-            df.loc[mask, 'Статус'] = 'выполнено'
-            df.loc[mask, 'Статус группы'] = '✅ Завершена'
-            df.loc[mask, 'Дата завершения работы'] = now_str
-            df.loc[mask, 'Дата выполнения'] = now_str
-            save_dept_data(sheet_name, df)
-            st.success("Статус обновлен на 'Выполнено'")
-            st.rerun()
+    if btn_col3.button("✅ Завершить", use_container_width=True):
+        modal_complete(sheet_name, summary_df, df)
 
 st.divider()
 
 # ==========================================
-# 4. РАЗДЕЛЕНИЕ РЕЕСТРА (АКТИВНЫЕ / ЗАВЕРШЕННЫЕ)
+# 5. РЕЕСТР АКТИВНЫХ И ЗАВЕРШЕННЫХ ГРУПП
 # ==========================================
 if summary_df.empty:
     st.info("Нет данных для отображения")
 else:
-    # Разделяем на активные и завершенные
     active_summary = summary_df[summary_df['Статус группы'] != '✅ Завершена'].reset_index(drop=True)
     completed_summary = summary_df[summary_df['Статус группы'] == '✅ Завершена'].reset_index(drop=True)
 
-    # Обновляем нумерацию № для активных
     if not active_summary.empty:
         active_summary['№'] = range(1, len(active_summary) + 1)
 
@@ -258,7 +322,6 @@ else:
 
     st.write("")
     
-    # Инициализация состояния кнопки
     if 'show_completed' not in st.session_state:
         st.session_state.show_completed = False
 
@@ -268,7 +331,6 @@ else:
         st.session_state.show_completed = not st.session_state.show_completed
         st.rerun()
 
-    # Показываем список завершенных по клику
     if st.session_state.show_completed:
         st.markdown("---")
         st.subheader(f"✅ Завершенные группы ({len(completed_summary)})")
