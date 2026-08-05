@@ -103,7 +103,7 @@ def build_summary(df):
             bool(date_done and date_done.lower() != 'nan' and date_done != '')
         )
         
-        # 2. На паузе (учитываем точное текстовое совпадение с эмодзи)
+        # 2. На паузе
         is_paused = (
             st_val in ['пауза', 'на паузе', '⏸️ на паузе'] or
             'пауз' in st_grp or
@@ -112,7 +112,7 @@ def build_summary(df):
             bool(pause_reason and pause_reason.lower() != 'nan' and pause_reason != '')
         )
         
-        # 3. В работе (только если НЕ завершена и НЕ на паузе)
+        # 3. В работе
         is_in_work = (
             not is_completed and not is_paused and (
                 st_val in ['в работе', 'взято в работу', '🔄 в работе'] or
@@ -179,7 +179,7 @@ def modal_take_in_work(sheet_name, summary_df, df):
             now_str = datetime.datetime.now().strftime("%d.%m.%Y %H:%M:%S")
             mask = df[source_col].isin(selected_files)
 
-            df.loc[mask, 'Статус'] = '⏸️ На паузе'
+            df.loc[mask, 'Статус'] = 'В работе'
             df.loc[mask, 'Статус группы'] = '🔄 В работе'
             df.loc[mask, 'Исполнитель'] = executor_name.strip()
             df.loc[mask, 'Дата взятия'] = now_str
@@ -254,15 +254,16 @@ def modal_unpause(sheet_name, summary_df, df):
 
 @st.dialog("✅ Завершить работу по файлам")
 def modal_complete(sheet_name, summary_df, df):
-    active_files = summary_df[summary_df['Статус группы'] != '✅ Завершена']['Имя файла'].tolist()
+    # Теперь фильтруем ТОЛЬКО файлы со статусом "🔄 В работе"
+    in_work_files = summary_df[summary_df['Статус группы'] == '🔄 В работе']['Имя файла'].tolist()
 
-    if not active_files:
-        st.info("Нет активных файлов для завершения.")
+    if not in_work_files:
+        st.info("Нет файлов в работе для завершения.")
         return
 
-    st.write("Выберите файлы для завершения:")
+    st.write("Выберите файлы в работе для завершения:")
     selected_files = []
-    for filename in active_files:
+    for filename in in_work_files:
         if st.checkbox(filename, key=f"chk_comp_{filename}"):
             selected_files.append(filename)
 
