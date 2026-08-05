@@ -96,20 +96,29 @@ def build_summary(df):
         date_take = str(first_row.get('Дата взятия', '')).strip()
         pause_reason = str(first_row.get('Причина паузы', '')).strip()
 
+        # 1. Завершенные
         is_completed = (
             st_val in ['выполнено', 'выполнен', 'завершен', 'завершена'] or
             'выполнено' in st_grp or 'заверш' in st_grp or
             bool(date_done and date_done.lower() != 'nan' and date_done != '')
         )
+        
+        # 2. На паузе (высокий приоритет — исключает статус "В работе")
         is_paused = (
             st_val in ['пауза', 'на паузе'] or
             'пауз' in st_grp or
+            '⏸️' in st_grp or
             bool(pause_reason and pause_reason.lower() != 'nan' and pause_reason != '')
         )
+        
+        # 3. В работе (только если НЕ завершена и НЕ на паузе)
         is_in_work = (
-            st_val in ['в работе', 'взято в работу'] or
-            'в работе' in st_grp or
-            bool(date_take and date_take.lower() != 'nan' and date_take != '')
+            not is_completed and not is_paused and (
+                st_val in ['в работе', 'взято в работу'] or
+                'в работе' in st_grp or
+                '🔄' in st_grp or
+                bool(date_take and date_take.lower() != 'nan' and date_take != '')
+            )
         )
 
         if is_completed:
