@@ -26,9 +26,10 @@ COLUMNS = [
 
 @st.cache_resource
 def get_gspread_client():
-    # Использует сервис-аккаунт или локальный файл ключей service_account.json
     scopes = ["https://www.googleapis.com/auth/spreadsheets"]
-    creds = Credentials.from_service_account_file("service_account.json", scopes=scopes)
+    # Авторизация через Secrets в Streamlit Cloud
+    creds_dict = dict(st.secrets["gcp_service_account"])
+    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
     return gspread.authorize(creds)
 
 def load_dept_data(sheet_name):
