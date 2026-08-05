@@ -4,6 +4,10 @@ import datetime
 import gspread
 from google.oauth2.service_account import Credentials
 
+# Загрузка из secrets
+credentials = st.secrets["gcp_service_account"]
+gc = gspread.service_account_from_dict(credentials)
+
 # Настройка страницы Streamlit
 st.set_page_config(page_title="Панель управления Контентом и КАМ", layout="wide")
 
