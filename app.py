@@ -98,8 +98,8 @@ def build_summary(df):
 
         # 1. Завершенные
         is_completed = (
-            st_val in ['выполнено', 'выполнен', 'завершен', 'завершена', '✅ завершена'] or
-            'выполнено' in st_grp or 'заверш' in st_grp or
+            st_val in ['выполнено', 'выполнен', 'завершен', 'завершена', '✅ выполнен', '✅ завершена'] or
+            'выполнен' in st_grp or 'выполнено' in st_grp or 'заверш' in st_grp or
             bool(date_done and date_done.lower() != 'nan' and date_done != '')
         )
         
@@ -123,7 +123,7 @@ def build_summary(df):
         )
 
         if is_completed:
-            done_cnt, in_work_cnt, new_cnt, group_status = total, 0, 0, '✅ Завершена'
+            done_cnt, in_work_cnt, new_cnt, group_status = total, 0, 0, '✅ Выполнен'
         elif is_paused:
             done_cnt, in_work_cnt, new_cnt, group_status = 0, 0, total, '⏸️ На паузе'
         elif is_in_work:
@@ -254,7 +254,6 @@ def modal_unpause(sheet_name, summary_df, df):
 
 @st.dialog("✅ Завершить работу по файлам")
 def modal_complete(sheet_name, summary_df, df):
-    # Теперь фильтруем ТОЛЬКО файлы со статусом "🔄 В работе"
     in_work_files = summary_df[summary_df['Статус группы'] == '🔄 В работе']['Имя файла'].tolist()
 
     if not in_work_files:
@@ -275,13 +274,13 @@ def modal_complete(sheet_name, summary_df, df):
             now_str = datetime.datetime.now().strftime("%d.%m.%Y %H:%M:%S")
             mask = df[source_col].isin(selected_files)
 
-            df.loc[mask, 'Статус'] = 'выполнено'
-            df.loc[mask, 'Статус группы'] = '✅ Завершена'
+            df.loc[mask, 'Статус'] = '✅ Выполнен'
+            df.loc[mask, 'Статус группы'] = '✅ Выполнен'
             df.loc[mask, 'Дата завершения работы'] = now_str
             df.loc[mask, 'Дата выполнения'] = now_str
 
             if save_dept_data(sheet_name, df):
-                st.success("Статус обновлен на 'Выполнено'")
+                st.success("Статус обновлен на '✅ Выполнен'")
                 st.rerun()
 
 # ==========================================
@@ -347,8 +346,8 @@ st.divider()
 if summary_df.empty:
     st.info("Нет данных для отображения")
 else:
-    active_summary = summary_df[summary_df['Статус группы'] != '✅ Завершена'].reset_index(drop=True)
-    completed_summary = summary_df[summary_df['Статус группы'] == '✅ Завершена'].reset_index(drop=True)
+    active_summary = summary_df[~summary_df['Статус группы'].isin(['✅ Выполнен', '✅ Завершена'])].reset_index(drop=True)
+    completed_summary = summary_df[summary_df['Статус группы'].isin(['✅ Выполнен', '✅ Завершена'])].reset_index(drop=True)
 
     if not active_summary.empty:
         active_summary['№'] = range(1, len(active_summary) + 1)
