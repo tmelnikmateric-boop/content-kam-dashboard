@@ -145,14 +145,13 @@ def build_summary(df):
 
 @st.dialog("▶️ Взять файлы в работу")
 def modal_take_in_work(sheet_name, summary_df, df):
-    # Фильтруем файлы со статусом "🆕 Новая"
     new_files = summary_df[summary_df['Статус группы'] == '🆕 Новая']['Имя файла'].tolist()
 
     if not new_files:
         st.info("Нет новых файлов для взятия в работу.")
         return
 
-    st.write("Выберите файлы:")
+    st.write("Выберите новые файлы:")
     selected_files = []
     for filename in new_files:
         if st.checkbox(filename, key=f"chk_new_{filename}"):
@@ -182,14 +181,13 @@ def modal_take_in_work(sheet_name, summary_df, df):
 
 @st.dialog("⏸️ Поставить файлы на паузу")
 def modal_pause(sheet_name, summary_df, df):
-    # Фильтруем файлы со статусом "🔄 В работе"
     in_work_files = summary_df[summary_df['Статус группы'] == '🔄 В работе']['Имя файла'].tolist()
 
     if not in_work_files:
         st.info("Нет файлов в работе для отправки на паузу.")
         return
 
-    st.write("Выберите файлы:")
+    st.write("Выберите файлы в работе:")
     selected_files = []
     for filename in in_work_files:
         if st.checkbox(filename, key=f"chk_work_{filename}"):
@@ -215,9 +213,37 @@ def modal_pause(sheet_name, summary_df, df):
                 st.success("Файлы переведены на паузу!")
                 st.rerun()
 
+@st.dialog("▶️ Снять файлы с паузы")
+def modal_unpause(sheet_name, summary_df, df):
+    paused_files = summary_df[summary_df['Статус группы'] == '⏸️ На паузе']['Имя файла'].tolist()
+
+    if not paused_files:
+        st.info("Нет файлов на паузе.")
+        return
+
+    st.write("Выберите файлы для возобновления работы:")
+    selected_files = []
+    for filename in paused_files:
+        if st.checkbox(filename, key=f"chk_unpause_{filename}"):
+            selected_files.append(filename)
+
+    if st.button("Вернуть в работу"):
+        if not selected_files:
+            st.warning("Отметьте хотя бы один файл!")
+        else:
+            source_col = 'Имя файла' if 'Имя файла' in df.columns else 'Источник'
+            mask = df[source_col].isin(selected_files)
+
+            df.loc[mask, 'Статус'] = 'В работе'
+            df.loc[mask, 'Статус группы'] = '🔄 В работе'
+            df.loc[mask, 'Причина паузы'] = ''
+
+            if save_dept_data(sheet_name, df):
+                st.success("Файлы успешно возвращены в работу!")
+                st.rerun()
+
 @st.dialog("✅ Завершить работу по файлам")
 def modal_complete(sheet_name, summary_df, df):
-    # Исключаем уже завершенные
     active_files = summary_df[summary_df['Статус группы'] != '✅ Завершена']['Имя файла'].tolist()
 
     if not active_files:
@@ -259,7 +285,7 @@ sheet_name = SHEET_MAP[dept]
 df = load_dept_data(sheet_name)
 summary_df = build_summary(df)
 
-col_upload, col_actions = st.columns([1, 2])
+col_upload, col_actions = st.columns([1, 2.5])
 
 with col_upload:
     st.subheader("1. Загрузка Excel")
@@ -286,17 +312,20 @@ with col_upload:
 
 with col_actions:
     st.subheader("2. Управление статусами")
-    st.write("Нажмите на кнопку действия для выбора файлов:")
+    st.write("Выберите необходимое действие:")
     
-    btn_col1, btn_col2, btn_col3 = st.columns(3)
+    btn_col1, btn_col2, btn_col3, btn_col4 = st.columns(4)
 
-    if btn_col1.button("▶️ Взять в работу", use_container_width=True):
+    if btn_col1.button("▶️ В работу", use_container_width=True):
         modal_take_in_work(sheet_name, summary_df, df)
 
     if btn_col2.button("⏸️ На паузу", use_container_width=True):
         modal_pause(sheet_name, summary_df, df)
 
-    if btn_col3.button("✅ Завершить", use_container_width=True):
+    if btn_col3.button("▶️ Снять с паузы", use_container_width=True):
+        modal_unpause(sheet_name, summary_df, df)
+
+    if btn_col4.button("✅ Завершить", use_container_width=True):
         modal_complete(sheet_name, summary_df, df)
 
 st.divider()
