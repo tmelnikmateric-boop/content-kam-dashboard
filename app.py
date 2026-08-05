@@ -178,9 +178,18 @@ with col_left:
 with col_right:
     st.subheader("2. Фильтр и управление статусами")
     source_col = 'Имя файла' if 'Имя файла' in df.columns else 'Источник'
-    all_files = df[source_col].unique().tolist() if not df.empty and source_col in df.columns else []
     
-    selected_files = st.multiselect("Выберите файл(ы):", options=all_files)
+    # Считаем сводные данные, чтобы точно знать статус каждой группы файлов
+    summary_df = build_summary(df)
+
+    if not summary_df.empty:
+        # Оставляем в списке выбора только те файлы, у которых статус НЕ '✅ Завершена'
+        active_files_df = summary_df[summary_df['Статус группы'] != '✅ Завершена']
+        available_files = active_files_df['Имя файла'].tolist()
+    else:
+        available_files = []
+    
+    selected_files = st.multiselect("Выберите файл(ы) для работы:", options=available_files)
     executor_name = st.text_input("Имя исполнителя:")
 
     btn_col1, btn_col2, btn_col3 = st.columns(3)
@@ -229,8 +238,6 @@ st.divider()
 # ==========================================
 # 4. РАЗДЕЛЕНИЕ РЕЕСТРА (АКТИВНЫЕ / ЗАВЕРШЕННЫЕ)
 # ==========================================
-summary_df = build_summary(df)
-
 if summary_df.empty:
     st.info("Нет данных для отображения")
 else:
