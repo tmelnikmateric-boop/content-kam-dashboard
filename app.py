@@ -4,10 +4,6 @@ import datetime
 import gspread
 from google.oauth2.service_account import Credentials
 
-# Загрузка из secrets
-credentials = st.secrets["gcp_service_account"]
-gc = gspread.service_account_from_dict(credentials)
-
 # Настройка страницы Streamlit
 st.set_page_config(page_title="Панель управления Контентом и КАМ", layout="wide")
 
@@ -229,10 +225,48 @@ with col_right:
             st.rerun()
 
 st.divider()
-st.subheader(f"📋 Реестр групп / файлов — {sheet_name.upper()}")
 
+# ==========================================
+# 4. РАЗДЕЛЕНИЕ РЕЕСТРА (АКТИВНЫЕ / ЗАВЕРШЕННЫЕ)
+# ==========================================
 summary_df = build_summary(df)
+
 if summary_df.empty:
     st.info("Нет данных для отображения")
 else:
-    st.dataframe(summary_df, use_container_width=True)
+    # Разделяем на активные и завершенные
+    active_summary = summary_df[summary_df['Статус группы'] != '✅ Завершена'].reset_index(drop=True)
+    completed_summary = summary_df[summary_df['Статус группы'] == '✅ Завершена'].reset_index(drop=True)
+
+    # Обновляем нумерацию № для активных
+    if not active_summary.empty:
+        active_summary['№'] = range(1, len(active_summary) + 1)
+
+    st.subheader(f"📋 Реестр активных групп — {sheet_name.upper()}")
+    
+    if active_summary.empty:
+        st.info("Все группы завершены или нет активных задач.")
+    else:
+        st.dataframe(active_summary, use_container_width=True)
+
+    st.write("")
+    
+    # Инициализация состояния кнопки
+    if 'show_completed' not in st.session_state:
+        st.session_state.show_completed = False
+
+    btn_label = "🙈 Скрыть завершенные группы" if st.session_state.show_completed else f"📂 Посмотреть завершенные группы ({len(completed_summary)})"
+    
+    if st.button(btn_label):
+        st.session_state.show_completed = not st.session_state.show_completed
+        st.rerun()
+
+    # Показываем список завершенных по клику
+    if st.session_state.show_completed:
+        st.markdown("---")
+        st.subheader(f"✅ Завершенные группы ({len(completed_summary)})")
+        if completed_summary.empty:
+            st.info("Завершенных групп пока нет.")
+        else:
+            completed_summary['№'] = range(1, len(completed_summary) + 1)
+            st.dataframe(completed_summary, use_container_width=True)
