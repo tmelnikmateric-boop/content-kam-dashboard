@@ -72,7 +72,9 @@ def load_dept_data(sheet_name):
         records = worksheet.get_all_records()
         if records:
             df = pd.DataFrame(records).astype(str)
-            df = df.replace({'nan': '', 'NaN': '', 'None': '', '<NA>': ''})
+            # Очистка названий колонок от случайных пробелов в начале/конце
+            df.columns = df.columns.astype(str).str.strip()
+            df = df.replace({'nan': '', 'NaN': '', 'None': '', '<NA>': '', 'NaT': ''})
             for col in COLUMNS:
                 if col not in df.columns:
                     df[col] = ''
@@ -109,6 +111,7 @@ def save_dept_data(dept_info, df):
 
             if wg_records:
                 wg_df = pd.DataFrame(wg_records)
+                wg_df.columns = wg_df.columns.astype(str).str.strip()
                 summary_df = build_summary(df)
 
                 if not summary_df.empty:
@@ -156,7 +159,6 @@ def calculate_business_days(date_str):
     if not date_str or str(date_str).lower() in ['nan', 'none', '']:
         return 0
     try:
-        # Парсим дату добавления (поддерживает формат с временем и без)
         clean_date_str = str(date_str).split(' ')[0]
         start_date = datetime.datetime.strptime(clean_date_str, "%d.%m.%Y").date()
         today = datetime.date.today()
@@ -164,7 +166,6 @@ def calculate_business_days(date_str):
         if start_date >= today:
             return 0
             
-        # numpy.busday_count считает количество рабочих дней (Пн-Пт) между двумя датами
         bus_days = np.busday_count(start_date, today)
         return int(bus_days)
     except Exception:
@@ -193,29 +194,32 @@ def build_summary(df):
         total = len(group)
         first_row = group.iloc[0]
 
+        # Вспомогательная функция для поиска значения по нескольким вариациям колонок среди всех строк группы
+        def get_group_val(possible_cols):
+            for col in possible_cols:
+                # Ищем совпадение без учета регистра и крайних пробелов
+                matching_cols = [c for c in group.columns if c.strip().lower() == col.strip().lower()]
+                for m_col in matching_cols:
+                    s = group[m_col].astype(str).str.strip()
+                    valid = s[~s.isin(['', 'nan', 'NaN', 'None', '<NA>', 'NaT'])]
+                    if not valid.empty:
+                        return valid.iloc[0]
+            return ''
+
         st_val = str(first_row.get('Статус', '')).strip().lower()
         st_grp = str(first_row.get('Статус группы', '')).strip().lower()
-        date_done = str(first_row.get('Дата завершения работы', '')).strip()
-        date_take = str(first_row.get('Дата взятия', '')).strip()
-        pause_reason = str(first_row.get('Причина паузы', '')).strip()
         
-        # Получение даты паузы с поддержкой альтернативных наименований колонок
-        date_pause = ''
-        for col in ['Дата паузы', 'Дата постановки на паузу']:
-            val = str(first_row.get(col, '')).strip()
-            if val and val.lower() not in ['nan', 'none', 'nat']:
-                date_pause = val
-                break
-
-        date_added = str(first_row.get('Дата добавления файла', first_row.get('Дата загрузки', ''))).strip()
-        if date_added.lower() in ['nan', 'none']:
-            date_added = ''
+        date_done = get_group_val(['Дата завершения работы', 'Дата выполнения'])
+        date_take = get_group_val(['Дата взятия', 'Дата начала работы'])
+        pause_reason = get_group_val(['Причина паузы', 'Причина'])
+        date_pause = get_group_val(['Дата паузы', 'Дата постановки на паузу'])
+        date_added = get_group_val(['Дата добавления файла', 'Дата загрузки', 'Дата добавления'])
 
         # 1. Завершенные
         is_completed = (
             st_val in ['выполнено', 'выполнен', 'завершен', 'завершена', '✅ выполнен', '✅ завершена'] or
             'выполнен' in st_grp or 'выполнено' in st_grp or 'заверш' in st_grp or
-            bool(date_done and date_done.lower() != 'nan' and date_done != '')
+            bool(date_done)
         )
 
         # 2. На паузе
@@ -224,7 +228,7 @@ def build_summary(df):
             'пауз' in st_grp or
             '⏸️' in st_grp or
             '⏸' in st_val or
-            bool(pause_reason and pause_reason.lower() != 'nan' and pause_reason != '')
+            bool(pause_reason)
         )
 
         # 3. В работе
@@ -233,7 +237,7 @@ def build_summary(df):
                 st_val in ['в работе', 'взято в работу', '🔄 в работе'] or
                 'в работе' in st_grp or
                 '🔄' in st_grp or
-                bool(date_take and date_take.lower() != 'nan' and date_take != '')
+                bool(date_take)
             )
         )
 
@@ -257,11 +261,11 @@ def build_summary(df):
             'В работе': in_work_cnt,
             'Выполнено': done_cnt,
             'Статус группы': group_status,
-            'Причина паузы': pause_reason if pause_reason.lower() != 'nan' else '',
+            'Причина паузы': pause_reason,
             'Дата паузы': date_pause,
             'Исполнитель': first_row.get('Исполнитель', ''),
-            'Дата начала работы': date_take if date_take.lower() != 'nan' else '',
-            'Дата завершения работы': date_done if date_done.lower() != 'nan' else '',
+            'Дата начала работы': date_take,
+            'Дата завершения работы': date_done,
             'Дата добавления': date_added,
             'Дней с добавления': days_passed
         })
