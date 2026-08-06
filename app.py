@@ -5,6 +5,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 # Настройка страницы Streamlit
+
 st.set_page_config(page_title="Панель управления Контентом и КАМ", layout="wide")
 
 # ==========================================
@@ -123,7 +124,7 @@ def build_summary(df):
         )
 
         if is_completed:
-            done_cnt, in_work_cnt, new_cnt, group_status = total, 0, 0, '✅ Завершена'
+            done_cnt, in_work_cnt, new_cnt, group_status = total, 0, 0, '✅ Выполнен'
         elif is_paused:
             done_cnt, in_work_cnt, new_cnt, group_status = 0, 0, total, '⏸️ На паузе'
         elif is_in_work:
@@ -274,13 +275,13 @@ def modal_complete(sheet_name, summary_df, df):
             now_str = datetime.datetime.now().strftime("%d.%m.%Y %H:%M:%S")
             mask = df[source_col].isin(selected_files)
 
-            df.loc[mask, 'Статус'] = '✅ Завершена'
-            df.loc[mask, 'Статус группы'] = '✅ Завершена'
+            df.loc[mask, 'Статус'] = '✅ Выполнен'
+            df.loc[mask, 'Статус группы'] = '✅ Выполнен'
             df.loc[mask, 'Дата завершения работы'] = now_str
             df.loc[mask, 'Дата выполнения'] = now_str
 
             if save_dept_data(sheet_name, df):
-                st.success("Статус обновлен на '✅ Завершена'")
+                st.success("Статус обновлен на '✅ Выполнен'")
                 st.rerun()
 
 # ==========================================
