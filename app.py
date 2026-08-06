@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import datetime
 import gspread
 from google.oauth2.service_account import Credentials
@@ -53,7 +54,7 @@ COLUMNS = [
     'ID', 'Внешний код', 'Группа 3', 'Наименование',
     'Статус', 'Исполнитель', 'Дата взятия', 
     'Дата выполнения', 'Дата завершения работы', 
-    'Причина паузы', 'Источник', 'Дата загрузки'
+    'Причина паузы', 'Источник', 'Дата загрузки', 'Дата паузы'
 ]
 
 @st.cache_resource
@@ -107,7 +108,6 @@ def save_dept_data(dept_info, df):
 
             if wg_records:
                 wg_df = pd.DataFrame(wg_records)
-
                 summary_df = build_summary(df)
 
                 if not summary_df.empty:
@@ -145,6 +145,27 @@ def save_dept_data(dept_info, df):
         return False
 
 # ==========================================
+# ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ: РАСЧЕТ РАБОЧИХ ДНЕЙ
+# ==========================================
+def calculate_business_days(date_str):
+    if not date_str or str(date_str).lower() == 'nan':
+        return 0
+    try:
+        # Парсим дату добавления (поддерживает формат с временем и без)
+        clean_date_str = str(date_str).split(' ')[0]
+        start_date = datetime.datetime.strptime(clean_date_str, "%d.%m.%Y").date()
+        today = datetime.date.today()
+        
+        if start_date >= today:
+            return 0
+            
+        # numpy.busday_count считает количество рабочих дней (Пн-Пт) между двумя датами
+        bus_days = np.busday_count(start_date, today)
+        return int(bus_days)
+    except Exception:
+        return 0
+
+# ==========================================
 # 2. РАСЧЕТ СВОДНОЙ ТАБЛИЦЫ
 # ==========================================
 def build_summary(df):
@@ -172,6 +193,8 @@ def build_summary(df):
         date_done = str(first_row.get('Дата завершения работы', '')).strip()
         date_take = str(first_row.get('Дата взятия', '')).strip()
         pause_reason = str(first_row.get('Причина паузы', '')).strip()
+        date_pause = str(first_row.get('Дата паузы', '')).strip()
+        date_added = str(first_row.get('Дата добавления файла', first_row.get('Дата загрузки', ''))).strip()
 
         # 1. Завершенные
         is_completed = (
@@ -208,8 +231,10 @@ def build_summary(df):
         else:
             done_cnt, in_work_cnt, new_cnt, group_status = 0, 0, total, '🆕 Новая'
 
+        # Расчет рабочих дней
+        days_passed = calculate_business_days(date_added)
+
         summary_rows.append({
-            '№': idx,
             'Имя файла': filename,
             'Группа 3': first_row.get('Группа 3', ''),
             'Количество товаров': total,
@@ -218,10 +243,12 @@ def build_summary(df):
             'Выполнено': done_cnt,
             'Статус группы': group_status,
             'Причина паузы': pause_reason,
+            'Дата паузы': date_pause,
             'Исполнитель': first_row.get('Исполнитель', ''),
-            'Дата взятия': date_take,
+            'Дата начала работы': date_take,
             'Дата завершения работы': date_done,
-            'Дата добавления файла': first_row.get('Дата добавления файла', first_row.get('Дата загрузки', ''))
+            'Дата добавления': date_added,
+            'Дней с добавления': days_passed
         })
 
     return pd.DataFrame(summary_rows)
@@ -290,11 +317,13 @@ def modal_pause(dept_info, summary_df, df):
             st.warning("Отметьте хотя бы один файл!")
         else:
             source_col = 'Имя файла' if 'Имя файла' in df.columns else 'Источник'
+            now_str = datetime.datetime.now().strftime("%d.%m.%Y %H:%M:%S")
             mask = df[source_col].isin(selected_files)
 
             df.loc[mask, 'Статус'] = '⏸️ На паузе'
             df.loc[mask, 'Статус группы'] = '⏸️ На паузе'
             df.loc[mask, 'Причина паузы'] = pause_reason
+            df.loc[mask, 'Дата паузы'] = now_str
 
             if save_dept_data(dept_info, df):
                 st.success("Файлы переведены на паузу!")
@@ -364,10 +393,8 @@ def modal_complete(dept_info, summary_df, df):
 # 4. ОСНОВНОЙ ИНТЕРФЕЙС STREAMLIT
 # ==========================================
 
-# Уменьшенный заголовок по центру
 st.markdown("<h2 class='custom-header'>Панель управления отдела контента</h2>", unsafe_allow_html=True)
 
-# Переключатель между отделами (по центру с крупным шрифтом)
 dept = st.radio(
     "Выберите отдел:", 
     options=['Отдел контента', 'Отдел маркетинга'], 
@@ -377,7 +404,6 @@ dept = st.radio(
 
 dept_info = SHEET_MAP[dept]
 
-# Загружаем текущие данные
 df = load_dept_data(dept_info['data'])
 summary_df = build_summary(df)
 
@@ -436,6 +462,7 @@ if summary_df.empty:
 else:
     st.subheader(f"📋 Реестр групп — {dept.upper()}")
 
+    # Фильтрация данных по статусам
     new_df = summary_df[summary_df['Статус группы'] == '🆕 Новая'].copy().reset_index(drop=True)
     paused_df = summary_df[summary_df['Статус группы'] == '⏸️ На паузе'].copy().reset_index(drop=True)
     work_df = summary_df[summary_df['Статус группы'] == '🔄 В работе'].copy().reset_index(drop=True)
@@ -447,26 +474,29 @@ else:
         f"🔄 В работе ({len(work_df)})"
     ])
 
+    # 1. Вкладка "Новые"
     with tab_new:
         if new_df.empty:
             st.info("Нет новых групп.")
         else:
-            new_df['№'] = range(1, len(new_df) + 1)
-            st.dataframe(new_df, use_container_width=True)
+            cols_new = ['Имя файла', 'Группа 3', 'Количество товаров', 'Дата добавления', 'Дней с добавления']
+            st.dataframe(new_df[cols_new], use_container_width=True, hide_index=True)
 
+    # 2. Вкладка "На паузе"
     with tab_paused:
         if paused_df.empty:
             st.info("Нет групп на паузе.")
         else:
-            paused_df['№'] = range(1, len(paused_df) + 1)
-            st.dataframe(paused_df, use_container_width=True)
+            cols_paused = ['Имя файла', 'Группа 3', 'Количество товаров', 'Исполнитель', 'Дата паузы', 'Причина паузы']
+            st.dataframe(paused_df[cols_paused], use_container_width=True, hide_index=True)
 
+    # 3. Вкладка "В работе"
     with tab_work:
         if work_df.empty:
             st.info("Нет групп в работе.")
         else:
-            work_df['№'] = range(1, len(work_df) + 1)
-            st.dataframe(work_df, use_container_width=True)
+            cols_work = ['Имя файла', 'Группа 3', 'Количество товаров', 'Исполнитель', 'Дата начала работы']
+            st.dataframe(work_df[cols_work], use_container_width=True, hide_index=True)
 
     st.write("")
 
@@ -485,5 +515,5 @@ else:
         if completed_summary.empty:
             st.info("Завершенных групп пока нет.")
         else:
-            completed_summary['№'] = range(1, len(completed_summary) + 1)
-            st.dataframe(completed_summary, use_container_width=True)
+            cols_completed = ['Имя файла', 'Группа 3', 'Количество товаров', 'Исполнитель', 'Дата начала работы', 'Дата завершения работы']
+            st.dataframe(completed_summary[cols_completed], use_container_width=True, hide_index=True)
