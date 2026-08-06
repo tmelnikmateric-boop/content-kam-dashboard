@@ -5,7 +5,33 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 # Настройка страницы Streamlit
-st.set_page_config(page_title="Панель управления Контентом и КАМ", layout="wide")
+st.set_page_config(page_title="Панель управления отдела контента", layout="wide")
+
+# Дополнительные CSS стили для выравнивания заголовков и кнопок выборки по центру
+st.markdown("""
+    <style>
+    /* Центрирование и уменьшение главного заголовка */
+    .custom-header {
+        text-align: center;
+        font-size: 1.8rem !important;
+        font-weight: 600;
+        margin-bottom: 25px;
+    }
+    
+    /* Увеличение текста в переключателе отделов и центрирование */
+    div[data-testid="stRadio"] > label {
+        display: none;
+    }
+    div[data-testid="stRadio"] > div {
+        justify-content: center;
+        gap: 20px;
+    }
+    div[data-testid="stRadio"] label p {
+        font-size: 1.25rem !important;
+        font-weight: 600 !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 # ==========================================
 # 1. ПОДКЛЮЧЕНИЕ К GOOGLE SHEETS
@@ -13,11 +39,11 @@ st.set_page_config(page_title="Панель управления Контент�
 SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1vCZQgzBPv8uahr8ckRI1f-TA_QS6Afz2B9NP_ZMj6ek/edit?gid=59376984#gid=59376984"
 
 SHEET_MAP = {
-    'Контент': {
+    'Отдел контента': {
         'data': '📥 Загруженные данные контента',
         'workgroups': '👥 Рабочие группы контента'
     },
-    'КАМ': {
+    'Отдел маркетинга': {
         'data': '📥 Загруженные данные КАМ',
         'workgroups': '👥 Рабочие группы КАМ'
     }
@@ -337,22 +363,33 @@ def modal_complete(dept_info, summary_df, df):
 # ==========================================
 # 4. ОСНОВНОЙ ИНТЕРФЕЙС STREAMLIT
 # ==========================================
-st.title("📊 Панель управления Контентом и КАМ")
 
-dept = st.radio("Выберите отдел:", options=['Контент', 'КАМ'], horizontal=True)
+# Уменьшенный заголовок по центру
+st.markdown("<h2 class='custom-header'>Панель управления отдела контента</h2>", unsafe_allow_html=True)
+
+# Переключатель между отделами (по центру с крупным шрифтом)
+dept = st.radio(
+    "Выберите отдел:", 
+    options=['Отдел контента', 'Отдел маркетинга'], 
+    horizontal=True,
+    label_visibility="collapsed"
+)
+
 dept_info = SHEET_MAP[dept]
 
 # Загружаем текущие данные
 df = load_dept_data(dept_info['data'])
 summary_df = build_summary(df)
 
+st.divider()
+
 col_upload, col_actions = st.columns([1, 2.5])
 
 with col_upload:
-    st.subheader("1. Загрузка Excel")
-    uploaded_file = st.file_uploader("Выберите .xlsx / .xls файл", type=['xlsx', 'xls'])
+    st.subheader(f"1. Загрузка файла ({dept.lower()})")
+    uploaded_file = st.file_uploader(f"Выберите .xlsx / .xls файл для {dept.lower()}", type=['xlsx', 'xls'])
     if uploaded_file is not None:
-        if st.button("Загрузить файл в систему"):
+        if st.button(f"Загрузить файл {dept.lower()}", use_container_width=True):
             uploaded_df = pd.read_excel(uploaded_file)
             now_str = datetime.datetime.now().strftime("%d.%m.%Y %H:%M:%S")
 
@@ -397,15 +434,13 @@ st.divider()
 if summary_df.empty:
     st.info("Нет данных для отображения")
 else:
-    st.subheader(f"📋 Реестр активных групп — {dept_info['data'].upper()}")
+    st.subheader(f"📋 Реестр групп — {dept.upper()}")
 
-    # Разделение сводной таблицы на группы по статусам
     new_df = summary_df[summary_df['Статус группы'] == '🆕 Новая'].copy().reset_index(drop=True)
     paused_df = summary_df[summary_df['Статус группы'] == '⏸️ На паузе'].copy().reset_index(drop=True)
     work_df = summary_df[summary_df['Статус группы'] == '🔄 В работе'].copy().reset_index(drop=True)
     completed_summary = summary_df[summary_df['Статус группы'].isin(['✅ Выполнен', '✅ Завершена'])].copy().reset_index(drop=True)
 
-    # Создание вкладок для активных категорий
     tab_new, tab_paused, tab_work = st.tabs([
         f"🆕 Новые ({len(new_df)})", 
         f"⏸️ На паузе ({len(paused_df)})", 
