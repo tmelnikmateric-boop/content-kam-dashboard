@@ -12,7 +12,6 @@ st.set_page_config(page_title="Панель управления Контент�
 # ==========================================
 SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1vCZQgzBPv8uahr8ckRI1f-TA_QS6Afz2B9NP_ZMj6ek/edit?gid=59376984#gid=59376984"
 
-# Карта основных листов и сопоставленных с ними рабочих листов
 SHEET_MAP = {
     'Контент': {
         'data': '📥 Загруженные данные контента',
@@ -56,10 +55,6 @@ def load_dept_data(sheet_name):
         return pd.DataFrame(columns=COLUMNS)
 
 def save_dept_data(dept_info, df):
-    """
-    Сохраняет основные данные и синхронизирует статус группы (H) 
-    и причину паузы (P) с листом "👥 Рабочие группы ..."
-    """
     data_sheet_name = dept_info['data']
     workgroup_sheet_name = dept_info['workgroups']
 
@@ -87,11 +82,9 @@ def save_dept_data(dept_info, df):
             if wg_records:
                 wg_df = pd.DataFrame(wg_records)
 
-                # Пересчитываем сводную таблицу, чтобы получить актуальные статусы по группам/файлам
                 summary_df = build_summary(df)
 
                 if not summary_df.empty:
-                    # Поиск ключевых колонок в рабочих группах
                     group_col = None
                     for c in ['Имя файла', 'Источник', 'Файл', 'Группа']:
                         if c in wg_df.columns:
@@ -99,17 +92,14 @@ def save_dept_data(dept_info, df):
                             break
 
                     if group_col:
-                        # Создаем словари соответствий для быстрого поиска
                         status_map = dict(zip(summary_df['Имя файла'], summary_df['Статус группы']))
                         pause_map = dict(zip(summary_df['Имя файла'], summary_df['Причина паузы']))
 
-                        # Если колонок H и P еще нет в DataFrame рабочих групп, создаем их
                         if 'Статус группы' not in wg_df.columns:
                             wg_df['Статус группы'] = ''
                         if 'Причина паузы' not in wg_df.columns:
                             wg_df['Причина паузы'] = ''
 
-                        # Обновляем значения на основе сводных данных
                         for idx, row in wg_df.iterrows():
                             filename = str(row.get(group_col, '')).strip()
                             if filename in status_map:
@@ -407,18 +397,41 @@ st.divider()
 if summary_df.empty:
     st.info("Нет данных для отображения")
 else:
-    active_summary = summary_df[~summary_df['Статус группы'].isin(['✅ Выполнен', '✅ Завершена'])].reset_index(drop=True)
-    completed_summary = summary_df[summary_df['Статус группы'].isin(['✅ Выполнен', '✅ Завершена'])].reset_index(drop=True)
-
-    if not active_summary.empty:
-        active_summary['№'] = range(1, len(active_summary) + 1)
-
     st.subheader(f"📋 Реестр активных групп — {dept_info['data'].upper()}")
 
-    if active_summary.empty:
-        st.info("Все группы завершены или нет активных задач.")
-    else:
-        st.dataframe(active_summary, use_container_width=True)
+    # Разделение сводной таблицы на группы по статусам
+    new_df = summary_df[summary_df['Статус группы'] == '🆕 Новая'].copy().reset_index(drop=True)
+    paused_df = summary_df[summary_df['Статус группы'] == '⏸️ На паузе'].copy().reset_index(drop=True)
+    work_df = summary_df[summary_df['Статус группы'] == '🔄 В работе'].copy().reset_index(drop=True)
+    completed_summary = summary_df[summary_df['Статус группы'].isin(['✅ Выполнен', '✅ Завершена'])].copy().reset_index(drop=True)
+
+    # Создание вкладок для активных категорий
+    tab_new, tab_paused, tab_work = st.tabs([
+        f"🆕 Новые ({len(new_df)})", 
+        f"⏸️ На паузе ({len(paused_df)})", 
+        f"🔄 В работе ({len(work_df)})"
+    ])
+
+    with tab_new:
+        if new_df.empty:
+            st.info("Нет новых групп.")
+        else:
+            new_df['№'] = range(1, len(new_df) + 1)
+            st.dataframe(new_df, use_container_width=True)
+
+    with tab_paused:
+        if paused_df.empty:
+            st.info("Нет групп на паузе.")
+        else:
+            paused_df['№'] = range(1, len(paused_df) + 1)
+            st.dataframe(paused_df, use_container_width=True)
+
+    with tab_work:
+        if work_df.empty:
+            st.info("Нет групп в работе.")
+        else:
+            work_df['№'] = range(1, len(work_df) + 1)
+            st.dataframe(work_df, use_container_width=True)
 
     st.write("")
 
