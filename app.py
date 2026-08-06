@@ -288,6 +288,7 @@ def modal_take_in_work(dept_info, summary_df, df):
             df.loc[mask, 'Исполнитель'] = executor_name.strip()
             df.loc[mask, 'Дата взятия'] = now_str
             df.loc[mask, 'Причина паузы'] = ''
+            df.loc[mask, 'Дата паузы'] = ''
 
             if save_dept_data(dept_info, df):
                 st.success("Статус обновлен на '🔄 В работе'")
@@ -353,6 +354,7 @@ def modal_unpause(dept_info, summary_df, df):
             df.loc[mask, 'Статус'] = 'В работе'
             df.loc[mask, 'Статус группы'] = '🔄 В работе'
             df.loc[mask, 'Причина паузы'] = ''
+            df.loc[mask, 'Дата паузы'] = ''
 
             if save_dept_data(dept_info, df):
                 st.success("Файлы успешно возвращены в работу!")
