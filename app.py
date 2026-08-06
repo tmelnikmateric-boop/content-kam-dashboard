@@ -72,6 +72,7 @@ def load_dept_data(sheet_name):
         records = worksheet.get_all_records()
         if records:
             df = pd.DataFrame(records).astype(str)
+            df = df.replace({'nan': '', 'NaN': '', 'None': '', '<NA>': ''})
             for col in COLUMNS:
                 if col not in df.columns:
                     df[col] = ''
@@ -101,7 +102,7 @@ def save_dept_data(dept_info, df):
         worksheet.clear()
         worksheet.update('A1', data_to_write)
 
-        # 2. Синхронизация статусов и причин паузы с листом "👥 Рабочие группы..."
+        # 2. Синхронизация статусов, причин и дат паузы с листом "👥 Рабочие группы..."
         try:
             wg_worksheet = sh.worksheet(workgroup_sheet_name)
             wg_records = wg_worksheet.get_all_records()
@@ -120,17 +121,21 @@ def save_dept_data(dept_info, df):
                     if group_col:
                         status_map = dict(zip(summary_df['Имя файла'], summary_df['Статус группы']))
                         pause_map = dict(zip(summary_df['Имя файла'], summary_df['Причина паузы']))
+                        date_pause_map = dict(zip(summary_df['Имя файла'], summary_df['Дата паузы']))
 
                         if 'Статус группы' not in wg_df.columns:
                             wg_df['Статус группы'] = ''
                         if 'Причина паузы' not in wg_df.columns:
                             wg_df['Причина паузы'] = ''
+                        if 'Дата паузы' not in wg_df.columns:
+                            wg_df['Дата паузы'] = ''
 
                         for idx, row in wg_df.iterrows():
                             filename = str(row.get(group_col, '')).strip()
                             if filename in status_map:
                                 wg_df.at[idx, 'Статус группы'] = status_map[filename]
                                 wg_df.at[idx, 'Причина паузы'] = pause_map.get(filename, '')
+                                wg_df.at[idx, 'Дата паузы'] = date_pause_map.get(filename, '')
 
                         wg_data = [wg_df.columns.tolist()] + wg_df.fillna('').values.tolist()
                         wg_worksheet.clear()
@@ -148,7 +153,7 @@ def save_dept_data(dept_info, df):
 # ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ: РАСЧЕТ РАБОЧИХ ДНЕЙ
 # ==========================================
 def calculate_business_days(date_str):
-    if not date_str or str(date_str).lower() == 'nan':
+    if not date_str or str(date_str).lower() in ['nan', 'none', '']:
         return 0
     try:
         # Парсим дату добавления (поддерживает формат с временем и без)
@@ -193,8 +198,18 @@ def build_summary(df):
         date_done = str(first_row.get('Дата завершения работы', '')).strip()
         date_take = str(first_row.get('Дата взятия', '')).strip()
         pause_reason = str(first_row.get('Причина паузы', '')).strip()
-        date_pause = str(first_row.get('Дата паузы', '')).strip()
+        
+        # Получение даты паузы с поддержкой альтернативных наименований колонок
+        date_pause = ''
+        for col in ['Дата паузы', 'Дата постановки на паузу']:
+            val = str(first_row.get(col, '')).strip()
+            if val and val.lower() not in ['nan', 'none', 'nat']:
+                date_pause = val
+                break
+
         date_added = str(first_row.get('Дата добавления файла', first_row.get('Дата загрузки', ''))).strip()
+        if date_added.lower() in ['nan', 'none']:
+            date_added = ''
 
         # 1. Завершенные
         is_completed = (
@@ -242,11 +257,11 @@ def build_summary(df):
             'В работе': in_work_cnt,
             'Выполнено': done_cnt,
             'Статус группы': group_status,
-            'Причина паузы': pause_reason,
+            'Причина паузы': pause_reason if pause_reason.lower() != 'nan' else '',
             'Дата паузы': date_pause,
             'Исполнитель': first_row.get('Исполнитель', ''),
-            'Дата начала работы': date_take,
-            'Дата завершения работы': date_done,
+            'Дата начала работы': date_take if date_take.lower() != 'nan' else '',
+            'Дата завершения работы': date_done if date_done.lower() != 'nan' else '',
             'Дата добавления': date_added,
             'Дней с добавления': days_passed
         })
