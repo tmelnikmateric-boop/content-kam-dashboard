@@ -5,7 +5,6 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 # Настройка страницы Streamlit
-
 st.set_page_config(page_title="Панель управления Контентом и КАМ", layout="wide")
 
 # ==========================================
@@ -13,9 +12,16 @@ st.set_page_config(page_title="Панель управления Контент�
 # ==========================================
 SPREADSHEET_URL = "https://docs.google.com/spreadsheets/d/1vCZQgzBPv8uahr8ckRI1f-TA_QS6Afz2B9NP_ZMj6ek/edit?gid=59376984#gid=59376984"
 
+# Карта основных листов и сопоставленных с ними рабочих листов
 SHEET_MAP = {
-    'Контент': '📥 Загруженные данные контента',
-    'КАМ': '📥 Загруженные данные КАМ'
+    'Контент': {
+        'data': '📥 Загруженные данные контента',
+        'workgroups': '👥 Рабочие группы контента'
+    },
+    'КАМ': {
+        'data': '📥 Загруженные данные КАМ',
+        'workgroups': '👥 Рабочие группы КАМ'
+    }
 }
 
 COLUMNS = [
@@ -49,20 +55,74 @@ def load_dept_data(sheet_name):
         st.error(f"Ошибка загрузки листа {sheet_name}: {e}")
         return pd.DataFrame(columns=COLUMNS)
 
-def save_dept_data(sheet_name, df):
+def save_dept_data(dept_info, df):
+    """
+    Сохраняет основные данные и синхронизирует статус группы (H) 
+    и причину паузы (P) с листом "👥 Рабочие группы ..."
+    """
+    data_sheet_name = dept_info['data']
+    workgroup_sheet_name = dept_info['workgroups']
+
     try:
         gc = get_gspread_client()
         sh = gc.open_by_url(SPREADSHEET_URL)
+
+        # 1. Сохранение основного листа с загруженными данными
         try:
-            worksheet = sh.worksheet(sheet_name)
+            worksheet = sh.worksheet(data_sheet_name)
         except gspread.WorksheetNotFound:
-            worksheet = sh.add_worksheet(title=sheet_name, rows="1000", cols="20")
+            worksheet = sh.add_worksheet(title=data_sheet_name, rows="1000", cols="20")
 
         df_to_save = df.fillna('')
         data_to_write = [df_to_save.columns.tolist()] + df_to_save.values.tolist()
-        
+
         worksheet.clear()
         worksheet.update('A1', data_to_write)
+
+        # 2. Синхронизация статусов и причин паузы с листом "👥 Рабочие группы..."
+        try:
+            wg_worksheet = sh.worksheet(workgroup_sheet_name)
+            wg_records = wg_worksheet.get_all_records()
+
+            if wg_records:
+                wg_df = pd.DataFrame(wg_records)
+
+                # Пересчитываем сводную таблицу, чтобы получить актуальные статусы по группам/файлам
+                summary_df = build_summary(df)
+
+                if not summary_df.empty:
+                    # Поиск ключевых колонок в рабочих группах
+                    group_col = None
+                    for c in ['Имя файла', 'Источник', 'Файл', 'Группа']:
+                        if c in wg_df.columns:
+                            group_col = c
+                            break
+
+                    if group_col:
+                        # Создаем словари соответствий для быстрого поиска
+                        status_map = dict(zip(summary_df['Имя файла'], summary_df['Статус группы']))
+                        pause_map = dict(zip(summary_df['Имя файла'], summary_df['Причина паузы']))
+
+                        # Если колонок H и P еще нет в DataFrame рабочих групп, создаем их
+                        if 'Статус группы' not in wg_df.columns:
+                            wg_df['Статус группы'] = ''
+                        if 'Причина паузы' not in wg_df.columns:
+                            wg_df['Причина паузы'] = ''
+
+                        # Обновляем значения на основе сводных данных
+                        for idx, row in wg_df.iterrows():
+                            filename = str(row.get(group_col, '')).strip()
+                            if filename in status_map:
+                                wg_df.at[idx, 'Статус группы'] = status_map[filename]
+                                wg_df.at[idx, 'Причина паузы'] = pause_map.get(filename, '')
+
+                        wg_data = [wg_df.columns.tolist()] + wg_df.fillna('').values.tolist()
+                        wg_worksheet.clear()
+                        wg_worksheet.update('A1', wg_data)
+
+        except Exception as wg_err:
+            st.warning(f"Данные сохранены, но не удалось обновить рабочий лист '{workgroup_sheet_name}': {wg_err}")
+
         return True
     except Exception as e:
         st.error(f"Ошибка сохранения: {e}")
@@ -99,11 +159,11 @@ def build_summary(df):
 
         # 1. Завершенные
         is_completed = (
-            st_val in ['выполнено', 'выполнен', 'завершен', 'завершена', '✅ выполнен', '✅ Завершена'] or
+            st_val in ['выполнено', 'выполнен', 'завершен', 'завершена', '✅ выполнен', '✅ завершена'] or
             'выполнен' in st_grp or 'выполнено' in st_grp or 'заверш' in st_grp or
             bool(date_done and date_done.lower() != 'nan' and date_done != '')
         )
-        
+
         # 2. На паузе
         is_paused = (
             st_val in ['пауза', 'на паузе', '⏸️ на паузе'] or
@@ -112,7 +172,7 @@ def build_summary(df):
             '⏸' in st_val or
             bool(pause_reason and pause_reason.lower() != 'nan' and pause_reason != '')
         )
-        
+
         # 3. В работе
         is_in_work = (
             not is_completed and not is_paused and (
@@ -155,7 +215,7 @@ def build_summary(df):
 # ==========================================
 
 @st.dialog("▶️ Взять файлы в работу")
-def modal_take_in_work(sheet_name, summary_df, df):
+def modal_take_in_work(dept_info, summary_df, df):
     new_files = summary_df[summary_df['Статус группы'] == '🆕 Новая']['Имя файла'].tolist()
 
     if not new_files:
@@ -186,12 +246,12 @@ def modal_take_in_work(sheet_name, summary_df, df):
             df.loc[mask, 'Дата взятия'] = now_str
             df.loc[mask, 'Причина паузы'] = ''
 
-            if save_dept_data(sheet_name, df):
+            if save_dept_data(dept_info, df):
                 st.success("Статус обновлен на '🔄 В работе'")
                 st.rerun()
 
 @st.dialog("⏸️ Поставить файлы на паузу")
-def modal_pause(sheet_name, summary_df, df):
+def modal_pause(dept_info, summary_df, df):
     in_work_files = summary_df[summary_df['Статус группы'] == '🔄 В работе']['Имя файла'].tolist()
 
     if not in_work_files:
@@ -220,12 +280,12 @@ def modal_pause(sheet_name, summary_df, df):
             df.loc[mask, 'Статус группы'] = '⏸️ На паузе'
             df.loc[mask, 'Причина паузы'] = pause_reason
 
-            if save_dept_data(sheet_name, df):
+            if save_dept_data(dept_info, df):
                 st.success("Файлы переведены на паузу!")
                 st.rerun()
 
 @st.dialog("▶️ Снять файлы с паузы")
-def modal_unpause(sheet_name, summary_df, df):
+def modal_unpause(dept_info, summary_df, df):
     paused_files = summary_df[summary_df['Статус группы'] == '⏸️ На паузе']['Имя файла'].tolist()
 
     if not paused_files:
@@ -249,12 +309,12 @@ def modal_unpause(sheet_name, summary_df, df):
             df.loc[mask, 'Статус группы'] = '🔄 В работе'
             df.loc[mask, 'Причина паузы'] = ''
 
-            if save_dept_data(sheet_name, df):
+            if save_dept_data(dept_info, df):
                 st.success("Файлы успешно возвращены в работу!")
                 st.rerun()
 
 @st.dialog("✅ Завершить работу по файлам")
-def modal_complete(sheet_name, summary_df, df):
+def modal_complete(dept_info, summary_df, df):
     in_work_files = summary_df[summary_df['Статус группы'] == '🔄 В работе']['Имя файла'].tolist()
 
     if not in_work_files:
@@ -280,7 +340,7 @@ def modal_complete(sheet_name, summary_df, df):
             df.loc[mask, 'Дата завершения работы'] = now_str
             df.loc[mask, 'Дата выполнения'] = now_str
 
-            if save_dept_data(sheet_name, df):
+            if save_dept_data(dept_info, df):
                 st.success("Статус обновлен на '✅ Выполнен'")
                 st.rerun()
 
@@ -290,10 +350,10 @@ def modal_complete(sheet_name, summary_df, df):
 st.title("📊 Панель управления Контентом и КАМ")
 
 dept = st.radio("Выберите отдел:", options=['Контент', 'КАМ'], horizontal=True)
-sheet_name = SHEET_MAP[dept]
+dept_info = SHEET_MAP[dept]
 
 # Загружаем текущие данные
-df = load_dept_data(sheet_name)
+df = load_dept_data(dept_info['data'])
 summary_df = build_summary(df)
 
 col_upload, col_actions = st.columns([1, 2.5])
@@ -317,27 +377,27 @@ with col_upload:
                     uploaded_df[col] = ''
 
             new_df = pd.concat([df, uploaded_df], ignore_index=True)
-            if save_dept_data(sheet_name, new_df):
+            if save_dept_data(dept_info, new_df):
                 st.success(f"Файл '{uploaded_file.name}' успешно сохранен!")
                 st.rerun()
 
 with col_actions:
     st.subheader("2. Управление статусами")
     st.write("Выберите необходимое действие:")
-    
+
     btn_col1, btn_col2, btn_col3, btn_col4 = st.columns(4)
 
     if btn_col1.button("▶️ В работу", use_container_width=True):
-        modal_take_in_work(sheet_name, summary_df, df)
+        modal_take_in_work(dept_info, summary_df, df)
 
     if btn_col2.button("⏸️ На паузу", use_container_width=True):
-        modal_pause(sheet_name, summary_df, df)
+        modal_pause(dept_info, summary_df, df)
 
     if btn_col3.button("▶️ Снять с паузы", use_container_width=True):
-        modal_unpause(sheet_name, summary_df, df)
+        modal_unpause(dept_info, summary_df, df)
 
     if btn_col4.button("✅ Завершить", use_container_width=True):
-        modal_complete(sheet_name, summary_df, df)
+        modal_complete(dept_info, summary_df, df)
 
 st.divider()
 
@@ -353,20 +413,20 @@ else:
     if not active_summary.empty:
         active_summary['№'] = range(1, len(active_summary) + 1)
 
-    st.subheader(f"📋 Реестр активных групп — {sheet_name.upper()}")
-    
+    st.subheader(f"📋 Реестр активных групп — {dept_info['data'].upper()}")
+
     if active_summary.empty:
         st.info("Все группы завершены или нет активных задач.")
     else:
         st.dataframe(active_summary, use_container_width=True)
 
     st.write("")
-    
+
     if 'show_completed' not in st.session_state:
         st.session_state.show_completed = False
 
     btn_label = "🙈 Скрыть завершенные группы" if st.session_state.show_completed else f"📂 Посмотреть завершенные группы ({len(completed_summary)})"
-    
+
     if st.button(btn_label):
         st.session_state.show_completed = not st.session_state.show_completed
         st.rerun()
