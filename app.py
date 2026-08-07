@@ -8,7 +8,7 @@ from google.oauth2.service_account import Credentials
 # Настройка страницы Streamlit
 st.set_page_config(page_title="Панель управления отдела контента", layout="wide")
 
-# Дополнительные CSS стили для выравнивания заголовков, кнопок и модальных окон
+# Дополнительные CSS стили
 st.markdown("""
     <style>
     /* Центрирование и уменьшение главного заголовка */
@@ -32,11 +32,10 @@ st.markdown("""
         font-weight: 600 !important;
     }
 
-    /* Настройка динамической высоты модальных окон со скроллбаром */
-    div[data-testid="stDialog"] > div:nth-child(2) {
-        max-height: 80vh !important;
+    /* Ограничение высоты модального окна и прокрутка */
+    div[role="dialog"], div[data-testid="stDialog"] > div:nth-child(2) {
+        max-height: 85vh !important;
         overflow-y: auto !important;
-        padding-right: 10px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -276,7 +275,7 @@ def build_summary(df):
     return pd.DataFrame(summary_rows)
 
 # ==========================================
-# 3. МОДАЛЬНЫЕ ОКНА (DIALOGS)
+# 3. МОДАЛЬНЫЕ ОКНА (DIALOGS) С ПРОКРУТКОЙ
 # ==========================================
 
 @st.dialog("▶️ Взять файлы в работу")
@@ -289,12 +288,14 @@ def modal_take_in_work(dept_info, summary_df, df):
 
     st.write("Выберите новые файлы:")
     selected_files = []
-    for _, row in new_df.iterrows():
-        filename = row['Имя файла']
-        count = row['Количество товаров']
-        label = f"{filename} — {count} SKU"
-        if st.checkbox(label, key=f"chk_new_{filename}"):
-            selected_files.append(filename)
+    
+    with st.container(height=300):
+        for _, row in new_df.iterrows():
+            filename = row['Имя файла']
+            count = row['Количество товаров']
+            label = f"{filename} — {count} SKU"
+            if st.checkbox(label, key=f"chk_new_{filename}"):
+                selected_files.append(filename)
 
     executor_name = st.text_input("Имя исполнителя:")
 
@@ -329,12 +330,14 @@ def modal_pause(dept_info, summary_df, df):
 
     st.write("Выберите файлы в работе:")
     selected_files = []
-    for _, row in in_work_df.iterrows():
-        filename = row['Имя файла']
-        count = row['Количество товаров']
-        label = f"{filename} — {count} SKU"
-        if st.checkbox(label, key=f"chk_work_{filename}"):
-            selected_files.append(filename)
+    
+    with st.container(height=300):
+        for _, row in in_work_df.iterrows():
+            filename = row['Имя файла']
+            count = row['Количество товаров']
+            label = f"{filename} — {count} SKU"
+            if st.checkbox(label, key=f"chk_work_{filename}"):
+                selected_files.append(filename)
 
     pause_reason = st.selectbox(
         "Укажите причину паузы:",
@@ -368,12 +371,14 @@ def modal_unpause(dept_info, summary_df, df):
 
     st.write("Выберите файлы для возобновления работы:")
     selected_files = []
-    for _, row in paused_df.iterrows():
-        filename = row['Имя файла']
-        count = row['Количество товаров']
-        label = f"{filename} — {count} SKU"
-        if st.checkbox(label, key=f"chk_unpause_{filename}"):
-            selected_files.append(filename)
+    
+    with st.container(height=300):
+        for _, row in paused_df.iterrows():
+            filename = row['Имя файла']
+            count = row['Количество товаров']
+            label = f"{filename} — {count} SKU"
+            if st.checkbox(label, key=f"chk_unpause_{filename}"):
+                selected_files.append(filename)
 
     if st.button("Вернуть в работу"):
         if not selected_files:
@@ -401,12 +406,14 @@ def modal_complete(dept_info, summary_df, df):
 
     st.write("Выберите файлы в работе для завершения:")
     selected_files = []
-    for _, row in in_work_df.iterrows():
-        filename = row['Имя файла']
-        count = row['Количество товаров']
-        label = f"{filename} — {count} SKU"
-        if st.checkbox(label, key=f"chk_comp_{filename}"):
-            selected_files.append(filename)
+    
+    with st.container(height=300):
+        for _, row in in_work_df.iterrows():
+            filename = row['Имя файла']
+            count = row['Количество товаров']
+            label = f"{filename} — {count} SKU"
+            if st.checkbox(label, key=f"chk_comp_{filename}"):
+                selected_files.append(filename)
 
     if st.button("Завершить"):
         if not selected_files:
