@@ -72,7 +72,6 @@ def load_dept_data(sheet_name):
         records = worksheet.get_all_records()
         if records:
             df = pd.DataFrame(records).astype(str)
-            # Очистка названий колонок от случайных пробелов в начале/конце
             df.columns = df.columns.astype(str).str.strip()
             df = df.replace({'nan': '', 'NaN': '', 'None': '', '<NA>': '', 'NaT': ''})
             for col in COLUMNS:
@@ -194,10 +193,8 @@ def build_summary(df):
         total = len(group)
         first_row = group.iloc[0]
 
-        # Вспомогательная функция для поиска значения по нескольким вариациям колонок среди всех строк группы
         def get_group_val(possible_cols):
             for col in possible_cols:
-                # Ищем совпадение без учета регистра и крайних пробелов
                 matching_cols = [c for c in group.columns if c.strip().lower() == col.strip().lower()]
                 for m_col in matching_cols:
                     s = group[m_col].astype(str).str.strip()
@@ -250,7 +247,6 @@ def build_summary(df):
         else:
             done_cnt, in_work_cnt, new_cnt, group_status = 0, 0, total, '🆕 Новая'
 
-        # Расчет рабочих дней
         days_passed = calculate_business_days(date_added)
 
         summary_rows.append({
@@ -278,16 +274,19 @@ def build_summary(df):
 
 @st.dialog("▶️ Взять файлы в работу")
 def modal_take_in_work(dept_info, summary_df, df):
-    new_files = summary_df[summary_df['Статус группы'] == '🆕 Новая']['Имя файла'].tolist()
+    new_df = summary_df[summary_df['Статус группы'] == '🆕 Новая']
 
-    if not new_files:
+    if new_df.empty:
         st.info("Нет новых файлов для взятия в работу.")
         return
 
     st.write("Выберите новые файлы:")
     selected_files = []
-    for filename in new_files:
-        if st.checkbox(filename, key=f"chk_new_{filename}"):
+    for _, row in new_df.iterrows():
+        filename = row['Имя файла']
+        count = row['Количество товаров']
+        label = f"{filename} — {count} SKU"
+        if st.checkbox(label, key=f"chk_new_{filename}"):
             selected_files.append(filename)
 
     executor_name = st.text_input("Имя исполнителя:")
@@ -315,16 +314,19 @@ def modal_take_in_work(dept_info, summary_df, df):
 
 @st.dialog("⏸️ Поставить файлы на паузу")
 def modal_pause(dept_info, summary_df, df):
-    in_work_files = summary_df[summary_df['Статус группы'] == '🔄 В работе']['Имя файла'].tolist()
+    in_work_df = summary_df[summary_df['Статус группы'] == '🔄 В работе']
 
-    if not in_work_files:
+    if in_work_df.empty:
         st.info("Нет файлов в работе для отправки на паузу.")
         return
 
     st.write("Выберите файлы в работе:")
     selected_files = []
-    for filename in in_work_files:
-        if st.checkbox(filename, key=f"chk_work_{filename}"):
+    for _, row in in_work_df.iterrows():
+        filename = row['Имя файла']
+        count = row['Количество товаров']
+        label = f"{filename} — {count} SKU"
+        if st.checkbox(label, key=f"chk_work_{filename}"):
             selected_files.append(filename)
 
     pause_reason = st.selectbox(
@@ -351,16 +353,19 @@ def modal_pause(dept_info, summary_df, df):
 
 @st.dialog("▶️ Снять файлы с паузы")
 def modal_unpause(dept_info, summary_df, df):
-    paused_files = summary_df[summary_df['Статус группы'] == '⏸️ На паузе']['Имя файла'].tolist()
+    paused_df = summary_df[summary_df['Статус группы'] == '⏸️ На паузе']
 
-    if not paused_files:
+    if paused_df.empty:
         st.info("Нет файлов на паузе.")
         return
 
     st.write("Выберите файлы для возобновления работы:")
     selected_files = []
-    for filename in paused_files:
-        if st.checkbox(filename, key=f"chk_unpause_{filename}"):
+    for _, row in paused_df.iterrows():
+        filename = row['Имя файла']
+        count = row['Количество товаров']
+        label = f"{filename} — {count} SKU"
+        if st.checkbox(label, key=f"chk_unpause_{filename}"):
             selected_files.append(filename)
 
     if st.button("Вернуть в работу"):
@@ -381,16 +386,19 @@ def modal_unpause(dept_info, summary_df, df):
 
 @st.dialog("✅ Завершить работу по файлам")
 def modal_complete(dept_info, summary_df, df):
-    in_work_files = summary_df[summary_df['Статус группы'] == '🔄 В работе']['Имя файла'].tolist()
+    in_work_df = summary_df[summary_df['Статус группы'] == '🔄 В работе']
 
-    if not in_work_files:
+    if in_work_df.empty:
         st.info("Нет файлов в работе для завершения.")
         return
 
     st.write("Выберите файлы в работе для завершения:")
     selected_files = []
-    for filename in in_work_files:
-        if st.checkbox(filename, key=f"chk_comp_{filename}"):
+    for _, row in in_work_df.iterrows():
+        filename = row['Имя файла']
+        count = row['Количество товаров']
+        label = f"{filename} — {count} SKU"
+        if st.checkbox(label, key=f"chk_comp_{filename}"):
             selected_files.append(filename)
 
     if st.button("Завершить"):
@@ -483,7 +491,6 @@ if summary_df.empty:
 else:
     st.subheader(f"📋 Реестр групп — {dept.upper()}")
 
-    # Фильтрация данных по статусам
     new_df = summary_df[summary_df['Статус группы'] == '🆕 Новая'].copy().reset_index(drop=True)
     paused_df = summary_df[summary_df['Статус группы'] == '⏸️ На паузе'].copy().reset_index(drop=True)
     work_df = summary_df[summary_df['Статус группы'] == '🔄 В работе'].copy().reset_index(drop=True)
