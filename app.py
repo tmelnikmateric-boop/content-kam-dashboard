@@ -449,29 +449,62 @@ def modal_analytics():
         summary_content = build_summary(df_content)
         summary_marketing = build_summary(df_marketing)
 
-    # Вспомогательная функция для генерации HTML-таблицы с объединением одинаковых ячеек (rowspan)
+    # Функция генерации таблицы с нежным, легким дизайном
     def render_grouped_html_table(df, group_col, cols_order, headers):
         if df.empty:
             return ""
         
         html = """
         <style>
+            .custom-table-container {
+                border: 1px solid #e6e8eb;
+                border-radius: 10px;
+                overflow: hidden;
+                margin-bottom: 24px;
+                box-shadow: 0 1px 4px rgba(0, 0, 0, 0.03);
+            }
             .custom-table {
                 width: 100%;
                 border-collapse: collapse;
-                margin-bottom: 20px;
-                font-family: sans-serif;
-            }
-            .custom-table th, .custom-table td {
-                border: 1px solid #444;
-                padding: 8px 12px;
-                text-align: left;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                font-size: 0.88rem;
             }
             .custom-table th {
-                background-color: #262730;
-                color: #ffffff;
+                background-color: #f8f9fa;
+                color: #555e6d;
+                font-weight: 500;
+                font-size: 0.8rem;
+                letter-spacing: 0.02em;
+                padding: 10px 14px;
+                border-bottom: 1px solid #e6e8eb;
+                border-right: 1px solid #f0f2f5;
+                text-align: left;
+            }
+            .custom-table th:last-child {
+                border-right: none;
+            }
+            .custom-table td {
+                border-bottom: 1px solid #f0f2f5;
+                border-right: 1px solid #f0f2f5;
+                padding: 9px 14px;
+                color: #31333f;
+                font-weight: 400;
+                background-color: #ffffff;
+            }
+            .custom-table tr:last-child td {
+                border-bottom: none;
+            }
+            .custom-table td:last-child {
+                border-right: none;
+            }
+            .grouped-cell {
+                background-color: #fcfcfd !important;
+                font-weight: 500 !important;
+                color: #2c3e50 !important;
+                vertical-align: middle !important;
             }
         </style>
+        <div class="custom-table-container">
         <table class="custom-table"><thead><tr>
         """
         for h in headers:
@@ -479,9 +512,6 @@ def modal_analytics():
         html += "</tr></thead><tbody>"
 
         # Считаем размер каждого блока группировки для rowspan
-        counts = df[group_col].value_counts(sort=False)
-        
-        # Получаем уникальные значения в порядке их появления
         seen = set()
         unique_ordered = [x for x in df[group_col] if not (x in seen or seen.add(x))]
 
@@ -493,7 +523,7 @@ def modal_analytics():
             for _, row in sub_df.iterrows():
                 html += "<tr>"
                 if first_row:
-                    html += f"<td rowspan='{rowspan}' style='vertical-align: top; font-weight: bold;'>{row[group_col]}</td>"
+                    html += f"<td rowspan='{rowspan}' class='grouped-cell'>{row[group_col]}</td>"
                     first_row = False
                 
                 for col in cols_order:
@@ -501,7 +531,7 @@ def modal_analytics():
                         html += f"<td>{row[col]}</td>"
                 html += "</tr>"
 
-        html += "</tbody></table>"
+        html += "</tbody></table></div>"
         return html
 
     with st.container(height=650):
@@ -509,7 +539,7 @@ def modal_analytics():
         new_content_sku = summary_content[summary_content['Статус группы'] == '🆕 Новая']['Количество товаров'].sum() if not summary_content.empty else 0
         new_marketing_sku = summary_marketing[summary_marketing['Статус группы'] == '🆕 Новая']['Количество товаров'].sum() if not summary_marketing.empty else 0
 
-        st.markdown("### 🆕 Новые SKU на добавление")
+        st.markdown("<h4 style='font-weight: 500; font-size: 1.05rem; margin-bottom: 12px;'>🆕 Новые SKU на добавление</h4>", unsafe_allow_html=True)
         col_m1, col_m2 = st.columns(2)
         col_m1.metric("Отдел контента", f"{new_content_sku} SKU")
         col_m2.metric("Отдел маркетинга", f"{new_marketing_sku} SKU")
@@ -528,8 +558,8 @@ def modal_analytics():
         if combined_summaries:
             all_summary = pd.concat(combined_summaries, ignore_index=True)
             
-            # 2. Статистика: Месяц -> Исполнитель -> Количество SKU (Объединяем ячейки Месяца)
-            st.markdown("### 👤 Статистика: Месяц / Исполнитель / SKU")
+            # 2. Статистика: Месяц -> Исполнитель -> Количество SKU
+            st.markdown("<h4 style='font-weight: 500; font-size: 1.05rem; margin-bottom: 12px;'>👤 Статистика по месяцам</h4>", unsafe_allow_html=True)
             
             def parse_date_and_month(row):
                 date_str = str(row['Дата завершения работы']) or str(row['Дата начала работы'])
@@ -553,7 +583,6 @@ def modal_analytics():
                 perf_df.sort_values(by=['Месяц_сорт', 'Исполнитель'], inplace=True)
                 perf_df.rename(columns={'Количество товаров': 'Количество SKU'}, inplace=True)
                 
-                # Рендерим HTML таблицу с объединением повторяющихся месяцев
                 html_table_perf = render_grouped_html_table(
                     df=perf_df,
                     group_col='Месяц',
@@ -562,12 +591,12 @@ def modal_analytics():
                 )
                 st.markdown(html_table_perf, unsafe_allow_html=True)
             else:
-                st.info("Нет данных о выполненных или находящихся в работе файлах с указанием исполнителя.")
+                st.info("Нет данных о выполненных или находящихся в работе файлах.")
 
             st.divider()
 
-            # 3. Количество SKU у каждого исполнителя в работе на данный момент (Объединяем ячейки Имени)
-            st.markdown("### 🔄 В работе на данный момент")
+            # 3. Товары в работе на данный момент
+            st.markdown("<h4 style='font-weight: 500; font-size: 1.05rem; margin-bottom: 12px;'>🔄 В работе на данный момент</h4>", unsafe_allow_html=True)
             in_work_summary = all_summary[all_summary['Статус группы'] == '🔄 В работе'].copy()
             
             if not in_work_summary.empty:
@@ -575,7 +604,6 @@ def modal_analytics():
                 work_by_exec.sort_values(by=['Исполнитель', 'Отдел'], inplace=True)
                 work_by_exec.rename(columns={'Количество товаров': 'SKU в работе'}, inplace=True)
 
-                # Рендерим HTML таблицу с объединением повторяющихся имен исполнителей
                 html_table_work = render_grouped_html_table(
                     df=work_by_exec,
                     group_col='Исполнитель',
