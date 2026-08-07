@@ -275,7 +275,7 @@ def build_summary(df):
     return pd.DataFrame(summary_rows)
 
 # ==========================================
-# 3. МОДАЛЬНЫЕ ОКНА (DIALOGS) С ПРОКРУТКОЙ
+# 3. МОДАЛЬНЫЕ ОКНА (DIALOGS)
 # ==========================================
 
 @st.dialog("▶️ Взять файлы в работу")
@@ -432,6 +432,80 @@ def modal_complete(dept_info, summary_df, df):
                 st.success("Статус обновлен на '✅ Выполнен'")
                 st.rerun()
 
+@st.dialog("📊 Аналитика и статистика")
+def modal_analytics():
+    with st.spinner("Сбор статистики..."):
+        df_content = load_dept_data(SHEET_MAP['Отдел контента']['data'])
+        df_marketing = load_dept_data(SHEET_MAP['Отдел маркетинга']['data'])
+
+        summary_content = build_summary(df_content)
+        summary_marketing = build_summary(df_marketing)
+
+    with st.container(height=400):
+        # 1. Сводные метрики по новым SKU
+        new_content_sku = summary_content[summary_content['Статус группы'] == '🆕 Новая']['Количество товаров'].sum() if not summary_content.empty else 0
+        new_marketing_sku = summary_marketing[summary_marketing['Статус группы'] == '🆕 Новая']['Количество товаров'].sum() if not summary_marketing.empty else 0
+
+        st.markdown("### 🆕 Новые SKU на добавление")
+        col_m1, col_m2 = st.columns(2)
+        col_m1.metric("Отдел контента", f"{new_content_sku} SKU")
+        col_m2.metric("Отдел маркетинга", f"{new_marketing_sku} SKU")
+
+        st.divider()
+
+        # Объединение сводок для общей аналитики по исполнителям
+        combined_summaries = []
+        if not summary_content.empty:
+            summary_content['Отдел'] = 'Контент'
+            combined_summaries.append(summary_content)
+        if not summary_marketing.empty:
+            summary_marketing['Отдел'] = 'Маркетинг'
+            combined_summaries.append(summary_marketing)
+
+        if combined_summaries:
+            all_summary = pd.concat(combined_summaries, ignore_index=True)
+            
+            # 2. Исполнитель — Месяц — Количество SKU
+            st.markdown("### 👤 Статистика: Исполнитель / Месяц / SKU")
+            
+            def extract_month(row):
+                date_str = str(row['Дата завершения работы']) or str(row['Дата начала работы'])
+                if date_str and len(date_str) >= 10:
+                    try:
+                        clean_date = date_str.split(' ')[0]
+                        dt = datetime.datetime.strptime(clean_date, "%d.%m.%Y")
+                        return dt.strftime("%Y-%m (%B)")
+                    except Exception:
+                        return "Неизвестно"
+                return "Неизвестно"
+
+            all_summary['Месяц'] = all_summary.apply(extract_month, axis=1)
+            
+            # Фильтруем файлы с назначенным исполнителем
+            exec_df = all_summary[all_summary['Исполнитель'].str.strip() != ''].copy()
+            
+            if not exec_df.empty:
+                perf_df = exec_df.groupby(['Исполнитель', 'Месяц'])['Количество товаров'].sum().reset_index()
+                perf_df.rename(columns={'Количество товаров': 'Всего SKU'}, inplace=True)
+                st.dataframe(perf_df, use_container_width=True, hide_index=True)
+            else:
+                st.info("Нет данных о выполненных или находящихся в работе файлах с указанием исполнителя.")
+
+            st.divider()
+
+            # 3. Количество SKU у каждого исполнителя в работе на данный момент
+            st.markdown("### 🔄 В работе на данный момент")
+            in_work_summary = all_summary[all_summary['Статус группы'] == '🔄 В работе'].copy()
+            
+            if not in_work_summary.empty:
+                work_by_exec = in_work_summary.groupby(['Исполнитель', 'Отдел'])['Количество товаров'].sum().reset_index()
+                work_by_exec.rename(columns={'Количество товаров': 'SKU в работе'}, inplace=True)
+                st.dataframe(work_by_exec, use_container_width=True, hide_index=True)
+            else:
+                st.info("В данный момент нет SKU в работе.")
+        else:
+            st.info("Данные в разделах отсутствуют.")
+
 # ==========================================
 # 4. ОСНОВНОЙ ИНТЕРФЕЙС STREAMLIT
 # ==========================================
@@ -478,10 +552,10 @@ with col_upload:
                 st.rerun()
 
 with col_actions:
-    st.subheader("2. Управление статусами")
+    st.subheader("2. Управление статусами и аналитикой")
     st.write("Выберите необходимое действие:")
 
-    btn_col1, btn_col2, btn_col3, btn_col4 = st.columns(4)
+    btn_col1, btn_col2, btn_col3, btn_col4, btn_col5 = st.columns(5)
 
     if btn_col1.button("▶️ В работу", use_container_width=True):
         modal_take_in_work(dept_info, summary_df, df)
@@ -494,6 +568,9 @@ with col_actions:
 
     if btn_col4.button("✅ Завершить", use_container_width=True):
         modal_complete(dept_info, summary_df, df)
+
+    if btn_col5.button("📊 Аналитика", use_container_width=True):
+        modal_analytics()
 
 st.divider()
 
