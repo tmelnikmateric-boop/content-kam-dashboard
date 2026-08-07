@@ -32,9 +32,11 @@ st.markdown("""
         font-weight: 600 !important;
     }
 
-    /* Ограничение высоты модального окна и прокрутка */
+    /* Увеличение размера модального окна до 80% экрана */
     div[role="dialog"], div[data-testid="stDialog"] > div:nth-child(2) {
         max-height: 85vh !important;
+        width: 80vw !important;
+        max-width: 80vw !important;
         overflow-y: auto !important;
     }
     </style>
@@ -62,6 +64,12 @@ COLUMNS = [
     'Дата выполнения', 'Дата завершения работы', 
     'Причина паузы', 'Источник', 'Дата загрузки', 'Дата паузы'
 ]
+
+MONTH_NAMES = {
+    1: "Январь", 2: "Февраль", 3: "Март", 4: "Апрель",
+    5: "Май", 6: "Июнь", 7: "Июль", 8: "Август",
+    9: "Сентябрь", 10: "Октябрь", 11: "Ноябрь", 12: "Декабрь"
+}
 
 @st.cache_resource
 def get_gspread_client():
@@ -289,7 +297,7 @@ def modal_take_in_work(dept_info, summary_df, df):
     st.write("Выберите новые файлы:")
     selected_files = []
     
-    with st.container(height=300):
+    with st.container(height=350):
         for _, row in new_df.iterrows():
             filename = row['Имя файла']
             count = row['Количество товаров']
@@ -331,7 +339,7 @@ def modal_pause(dept_info, summary_df, df):
     st.write("Выберите файлы в работе:")
     selected_files = []
     
-    with st.container(height=300):
+    with st.container(height=350):
         for _, row in in_work_df.iterrows():
             filename = row['Имя файла']
             count = row['Количество товаров']
@@ -372,7 +380,7 @@ def modal_unpause(dept_info, summary_df, df):
     st.write("Выберите файлы для возобновления работы:")
     selected_files = []
     
-    with st.container(height=300):
+    with st.container(height=350):
         for _, row in paused_df.iterrows():
             filename = row['Имя файла']
             count = row['Количество товаров']
@@ -407,7 +415,7 @@ def modal_complete(dept_info, summary_df, df):
     st.write("Выберите файлы в работе для завершения:")
     selected_files = []
     
-    with st.container(height=300):
+    with st.container(height=350):
         for _, row in in_work_df.iterrows():
             filename = row['Имя файла']
             count = row['Количество товаров']
@@ -441,7 +449,7 @@ def modal_analytics():
         summary_content = build_summary(df_content)
         summary_marketing = build_summary(df_marketing)
 
-    with st.container(height=400):
+    with st.container(height=650):
         # 1. Сводные метрики по новым SKU
         new_content_sku = summary_content[summary_content['Статус группы'] == '🆕 Новая']['Количество товаров'].sum() if not summary_content.empty else 0
         new_marketing_sku = summary_marketing[summary_marketing['Статус группы'] == '🆕 Новая']['Количество товаров'].sum() if not summary_marketing.empty else 0
@@ -453,7 +461,7 @@ def modal_analytics():
 
         st.divider()
 
-        # Объединение сводок для общей аналитики по исполнителям
+        # Объединение данных обоих отделов
         combined_summaries = []
         if not summary_content.empty:
             summary_content['Отдел'] = 'Контент'
@@ -465,28 +473,33 @@ def modal_analytics():
         if combined_summaries:
             all_summary = pd.concat(combined_summaries, ignore_index=True)
             
-            # 2. Исполнитель — Месяц — Количество SKU
-            st.markdown("### 👤 Статистика: Исполнитель / Месяц / SKU")
+            # 2. Статистика: Месяц -> Исполнитель -> Количество SKU
+            st.markdown("### 👤 Статистика: Месяц / Исполнитель / SKU")
             
-            def extract_month(row):
+            def parse_date_and_month(row):
                 date_str = str(row['Дата завершения работы']) or str(row['Дата начала работы'])
                 if date_str and len(date_str) >= 10:
                     try:
                         clean_date = date_str.split(' ')[0]
                         dt = datetime.datetime.strptime(clean_date, "%d.%m.%Y")
-                        return dt.strftime("%Y-%m (%B)")
+                        month_str = f"{MONTH_NAMES[dt.month]} {dt.year}"
+                        sort_key = dt.strftime("%Y-%m")
+                        return pd.Series([month_str, sort_key])
                     except Exception:
-                        return "Неизвестно"
-                return "Неизвестно"
+                        return pd.Series(["Неизвестно", "9999-99"])
+                return pd.Series(["Неизвестно", "9999-99"])
 
-            all_summary['Месяц'] = all_summary.apply(extract_month, axis=1)
+            all_summary[['Месяц', 'Месяц_сорт']] = all_summary.apply(parse_date_and_month, axis=1)
             
-            # Фильтруем файлы с назначенным исполнителем
             exec_df = all_summary[all_summary['Исполнитель'].str.strip() != ''].copy()
             
             if not exec_df.empty:
-                perf_df = exec_df.groupby(['Исполнитель', 'Месяц'])['Количество товаров'].sum().reset_index()
-                perf_df.rename(columns={'Количество товаров': 'Всего SKU'}, inplace=True)
+                perf_df = exec_df.groupby(['Месяц_сорт', 'Месяц', 'Исполнитель'])['Количество товаров'].sum().reset_index()
+                perf_df.sort_values(by=['Месяц_сорт', 'Исполнитель'], inplace=True)
+                perf_df.rename(columns={'Количество товаров': 'Количество SKU'}, inplace=True)
+                
+                # Итоговый порядок колонок: Месяц, Исполнитель, Количество SKU
+                perf_df = perf_df[['Месяц', 'Исполнитель', 'Количество SKU']]
                 st.dataframe(perf_df, use_container_width=True, hide_index=True)
             else:
                 st.info("Нет данных о выполненных или находящихся в работе файлах с указанием исполнителя.")
