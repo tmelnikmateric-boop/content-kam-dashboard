@@ -449,6 +449,61 @@ def modal_analytics():
         summary_content = build_summary(df_content)
         summary_marketing = build_summary(df_marketing)
 
+    # Вспомогательная функция для генерации HTML-таблицы с объединением одинаковых ячеек (rowspan)
+    def render_grouped_html_table(df, group_col, cols_order, headers):
+        if df.empty:
+            return ""
+        
+        html = """
+        <style>
+            .custom-table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-bottom: 20px;
+                font-family: sans-serif;
+            }
+            .custom-table th, .custom-table td {
+                border: 1px solid #444;
+                padding: 8px 12px;
+                text-align: left;
+            }
+            .custom-table th {
+                background-color: #262730;
+                color: #ffffff;
+            }
+        </style>
+        <table class="custom-table"><thead><tr>
+        """
+        for h in headers:
+            html += f"<th>{h}</th>"
+        html += "</tr></thead><tbody>"
+
+        # Считаем размер каждого блока группировки для rowspan
+        counts = df[group_col].value_counts(sort=False)
+        
+        # Получаем уникальные значения в порядке их появления
+        seen = set()
+        unique_ordered = [x for x in df[group_col] if not (x in seen or seen.add(x))]
+
+        for val in unique_ordered:
+            sub_df = df[df[group_col] == val]
+            rowspan = len(sub_df)
+            first_row = True
+
+            for _, row in sub_df.iterrows():
+                html += "<tr>"
+                if first_row:
+                    html += f"<td rowspan='{rowspan}' style='vertical-align: top; font-weight: bold;'>{row[group_col]}</td>"
+                    first_row = False
+                
+                for col in cols_order:
+                    if col != group_col:
+                        html += f"<td>{row[col]}</td>"
+                html += "</tr>"
+
+        html += "</tbody></table>"
+        return html
+
     with st.container(height=650):
         # 1. Сводные метрики по новым SKU
         new_content_sku = summary_content[summary_content['Статус группы'] == '🆕 Новая']['Количество товаров'].sum() if not summary_content.empty else 0
@@ -464,16 +519,16 @@ def modal_analytics():
         # Объединение данных обоих отделов
         combined_summaries = []
         if not summary_content.empty:
-            summary_content['Отдел'] = 'Контент'
+            summary_content['Отдел'] = 'Отдел контента'
             combined_summaries.append(summary_content)
         if not summary_marketing.empty:
-            summary_marketing['Отдел'] = 'Маркетинг'
+            summary_marketing['Отдел'] = 'Отдел маркетинга'
             combined_summaries.append(summary_marketing)
 
         if combined_summaries:
             all_summary = pd.concat(combined_summaries, ignore_index=True)
             
-            # 2. Статистика: Месяц -> Исполнитель -> Количество SKU
+            # 2. Статистика: Месяц -> Исполнитель -> Количество SKU (Объединяем ячейки Месяца)
             st.markdown("### 👤 Статистика: Месяц / Исполнитель / SKU")
             
             def parse_date_and_month(row):
@@ -498,22 +553,36 @@ def modal_analytics():
                 perf_df.sort_values(by=['Месяц_сорт', 'Исполнитель'], inplace=True)
                 perf_df.rename(columns={'Количество товаров': 'Количество SKU'}, inplace=True)
                 
-                # Итоговый порядок колонок: Месяц, Исполнитель, Количество SKU
-                perf_df = perf_df[['Месяц', 'Исполнитель', 'Количество SKU']]
-                st.dataframe(perf_df, use_container_width=True, hide_index=True)
+                # Рендерим HTML таблицу с объединением повторяющихся месяцев
+                html_table_perf = render_grouped_html_table(
+                    df=perf_df,
+                    group_col='Месяц',
+                    cols_order=['Месяц', 'Исполнитель', 'Количество SKU'],
+                    headers=['Месяц', 'Исполнитель', 'Количество SKU']
+                )
+                st.markdown(html_table_perf, unsafe_allow_html=True)
             else:
                 st.info("Нет данных о выполненных или находящихся в работе файлах с указанием исполнителя.")
 
             st.divider()
 
-            # 3. Количество SKU у каждого исполнителя в работе на данный момент
+            # 3. Количество SKU у каждого исполнителя в работе на данный момент (Объединяем ячейки Имени)
             st.markdown("### 🔄 В работе на данный момент")
             in_work_summary = all_summary[all_summary['Статус группы'] == '🔄 В работе'].copy()
             
             if not in_work_summary.empty:
                 work_by_exec = in_work_summary.groupby(['Исполнитель', 'Отдел'])['Количество товаров'].sum().reset_index()
+                work_by_exec.sort_values(by=['Исполнитель', 'Отдел'], inplace=True)
                 work_by_exec.rename(columns={'Количество товаров': 'SKU в работе'}, inplace=True)
-                st.dataframe(work_by_exec, use_container_width=True, hide_index=True)
+
+                # Рендерим HTML таблицу с объединением повторяющихся имен исполнителей
+                html_table_work = render_grouped_html_table(
+                    df=work_by_exec,
+                    group_col='Исполнитель',
+                    cols_order=['Исполнитель', 'Отдел', 'SKU в работе'],
+                    headers=['Исполнитель', 'Отдел', 'SKU в работе']
+                )
+                st.markdown(html_table_work, unsafe_allow_html=True)
             else:
                 st.info("В данный момент нет SKU в работе.")
         else:
