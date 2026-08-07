@@ -8,7 +8,7 @@ from google.oauth2.service_account import Credentials
 # Настройка страницы Streamlit
 st.set_page_config(page_title="Панель управления отдела контента", layout="wide")
 
-# Дополнительные CSS стили для выравнивания заголовков и кнопок выборки по центру
+# Дополнительные CSS стили для выравнивания заголовков, кнопок и модальных окон
 st.markdown("""
     <style>
     /* Центрирование и уменьшение главного заголовка */
@@ -30,6 +30,13 @@ st.markdown("""
     div[data-testid="stRadio"] label p {
         font-size: 1.25rem !important;
         font-weight: 600 !important;
+    }
+
+    /* Настройка динамической высоты модальных окон со скроллбаром */
+    div[data-testid="stDialog"] > div:nth-child(2) {
+        max-height: 80vh !important;
+        overflow-y: auto !important;
+        padding-right: 10px;
     }
     </style>
 """, unsafe_allow_html=True)
