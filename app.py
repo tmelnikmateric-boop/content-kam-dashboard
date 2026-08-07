@@ -746,3 +746,195 @@ else:
         else:
             cols_completed = ['Имя файла', 'Группа 3', 'Количество товаров', 'Исполнитель', 'Дата начала работы', 'Дата завершения работы']
             st.dataframe(completed_summary[cols_completed], use_container_width=True, hide_index=True)
+
+# Добавляем название нового листа в константы
+CONTACTS_SHEET_NAME = '📇 Контакты поставщиков'
+CONTACT_COLUMNS = ['Производитель', 'Оф.сайт', 'Контакт', 'Имя', 'Группы товаров', 'Примечание']
+
+def load_contacts_data():
+    try:
+        gc = get_gspread_client()
+        sh = gc.open_by_url(SPREADSHEET_URL)
+        try:
+            worksheet = sh.worksheet(CONTACTS_SHEET_NAME)
+        except gspread.WorksheetNotFound:
+            worksheet = sh.add_worksheet(title=CONTACTS_SHEET_NAME, rows="1000", cols="10")
+            worksheet.append_row(CONTACT_COLUMNS)
+            return pd.DataFrame(columns=CONTACT_COLUMNS)
+
+        records = worksheet.get_all_records()
+        if records:
+            df = pd.DataFrame(records).astype(str)
+            df.columns = df.columns.astype(str).str.strip()
+            for col in CONTACT_COLUMNS:
+                if col not in df.columns:
+                    df[col] = ''
+            return df[CONTACT_COLUMNS]
+        return pd.DataFrame(columns=CONTACT_COLUMNS)
+    except Exception as e:
+        st.error(f"Ошибка загрузки контактов: {e}")
+        return pd.DataFrame(columns=CONTACT_COLUMNS)
+
+def add_contact_row(new_row_dict):
+    try:
+        gc = get_gspread_client()
+        sh = gc.open_by_url(SPREADSHEET_URL)
+        try:
+            worksheet = sh.worksheet(CONTACTS_SHEET_NAME)
+        except gspread.WorksheetNotFound:
+            worksheet = sh.add_worksheet(title=CONTACTS_SHEET_NAME, rows="1000", cols="10")
+            worksheet.append_row(CONTACT_COLUMNS)
+
+        row_values = [str(new_row_dict.get(col, '')).strip() for col in CONTACT_COLUMNS]
+        worksheet.append_row(row_values)
+        return True
+    except Exception as e:
+        st.error(f"Ошибка сохранения контакта: {e}")
+        return False
+
+
+@st.dialog("📊 Аналитика и контакты")
+def modal_analytics():
+    # Создаем вкладки внутри модального окна
+    tab_stats, tab_contacts = st.tabs(["📊 Статистика", "📇 Контакты поставщиков"])
+
+    with tab_stats:
+        with st.spinner("Сбор статистики..."):
+            df_content = load_dept_data(SHEET_MAP['Отдел контента']['data'])
+            df_marketing = load_dept_data(SHEET_MAP['Отдел маркетинга']['data'])
+
+            summary_content = build_summary(df_content)
+            summary_marketing = build_summary(df_marketing)
+
+        with st.container(height=580):
+            new_content_sku = summary_content[summary_content['Статус группы'] == '🆕 Новая']['Количество товаров'].sum() if not summary_content.empty else 0
+            new_marketing_sku = summary_marketing[summary_marketing['Статус группы'] == '🆕 Новая']['Количество товаров'].sum() if not summary_marketing.empty else 0
+
+            st.markdown("<h4 style='font-weight: 500; font-size: 1.05rem; margin-bottom: 12px;'>🆕 Новые SKU на добавление</h4>", unsafe_allow_html=True)
+            col_m1, col_m2 = st.columns(2)
+            col_m1.metric("Отдел контента", f"{new_content_sku} SKU")
+            col_m2.metric("Отдел маркетинга", f"{new_marketing_sku} SKU")
+
+            st.divider()
+
+            combined_summaries = []
+            if not summary_content.empty:
+                summary_content['Отдел'] = 'Отдел контента'
+                combined_summaries.append(summary_content)
+            if not summary_marketing.empty:
+                summary_marketing['Отдел'] = 'Отдел маркетинга'
+                combined_summaries.append(summary_marketing)
+
+            if combined_summaries:
+                all_summary = pd.concat(combined_summaries, ignore_index=True)
+                
+                st.markdown("<h4 style='font-weight: 500; font-size: 1.05rem; margin-bottom: 12px;'>👤 Статистика по месяцам</h4>", unsafe_allow_html=True)
+                
+                def parse_date_and_month(row):
+                    date_str = str(row['Дата завершения работы']) or str(row['Дата начала работы'])
+                    if date_str and len(date_str) >= 10:
+                        try:
+                            clean_date = date_str.split(' ')[0]
+                            dt = datetime.datetime.strptime(clean_date, "%d.%m.%Y")
+                            month_str = f"{MONTH_NAMES[dt.month]} {dt.year}"
+                            sort_key = dt.strftime("%Y-%m")
+                            return pd.Series([month_str, sort_key])
+                        except Exception:
+                            return pd.Series(["Неизвестно", "9999-99"])
+                    return pd.Series(["Неизвестно", "9999-99"])
+
+                all_summary[['Месяц', 'Месяц_сорт']] = all_summary.apply(parse_date_and_month, axis=1)
+                exec_df = all_summary[all_summary['Исполнитель'].str.strip() != ''].copy()
+                
+                if not exec_df.empty:
+                    perf_df = exec_df.groupby(['Месяц_сорт', 'Месяц', 'Исполнитель'])['Количество товаров'].sum().reset_index()
+                    perf_df.sort_values(by=['Месяц_сорт', 'Исполнитель'], inplace=True)
+                    perf_df.rename(columns={'Количество товаров': 'Количество SKU'}, inplace=True)
+                    
+                    html_table_perf = render_grouped_html_table(
+                        df=perf_df,
+                        group_col='Месяц',
+                        cols_order=['Месяц', 'Исполнитель', 'Количество SKU'],
+                        headers=['Месяц', 'Исполнитель', 'Количество SKU']
+                    )
+                    st.markdown(html_table_perf, unsafe_allow_html=True)
+                else:
+                    st.info("Нет данных о выполненных файлах.")
+
+                st.divider()
+
+                st.markdown("<h4 style='font-weight: 500; font-size: 1.05rem; margin-bottom: 12px;'>🔄 В работе на данный момент</h4>", unsafe_allow_html=True)
+                in_work_summary = all_summary[all_summary['Статус группы'] == '🔄 В работе'].copy()
+                
+                if not in_work_summary.empty:
+                    work_by_exec = in_work_summary.groupby(['Исполнитель', 'Отдел'])['Количество товаров'].sum().reset_index()
+                    work_by_exec.sort_values(by=['Исполнитель', 'Отдел'], inplace=True)
+                    work_by_exec.rename(columns={'Количество товаров': 'SKU в работе'}, inplace=True)
+
+                    html_table_work = render_grouped_html_table(
+                        df=work_by_exec,
+                        group_col='Исполнитель',
+                        cols_order=['Исполнитель', 'Отдел', 'SKU в работе'],
+                        headers=['Исполнитель', 'Отдел', 'SKU в работе']
+                    )
+                    st.markdown(html_table_work, unsafe_allow_html=True)
+                else:
+                    st.info("В данный момент нет SKU в работе.")
+            else:
+                st.info("Данные отсутствуют.")
+
+    with tab_contacts:
+        st.markdown("<h4 style='font-weight: 500; font-size: 1.05rem; margin-top: 10px; margin-bottom: 12px;'>➕ Добавить новый контакт</h4>", unsafe_allow_html=True)
+        
+        with st.form("add_contact_form", clear_on_submit=True):
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                producer = st.text_input("Производитель")
+                name = st.text_input("Имя")
+            with c2:
+                site = st.text_input("Оф.сайт")
+                groups = st.text_input("Группы товаров")
+            with c3:
+                contact_info = st.text_input("Контакт")
+                note = st.text_input("Примечание")
+
+            submit_contact = st.form_submit_button("Сохранить контакт", use_container_width=True)
+
+            if submit_contact:
+                if not producer.strip() and not name.strip():
+                    st.warning("Заполните хотя бы 'Производитель' или 'Имя'!")
+                else:
+                    new_contact = {
+                        'Производитель': producer,
+                        'Оф.сайт': site,
+                        'Контакт': contact_info,
+                        'Имя': name,
+                        'Группы товаров': groups,
+                        'Примечание': note
+                    }
+                    if add_contact_row(new_contact):
+                        st.success("Контакт успешно добавлен!")
+                        st.rerun()
+
+        st.divider()
+
+        st.markdown("<h4 style='font-weight: 500; font-size: 1.05rem; margin-bottom: 12px;'>📋 Список контактов поставщиков</h4>", unsafe_allow_html=True)
+        contacts_df = load_contacts_data()
+
+        if not contacts_df.empty:
+            search_query = st.text_input("🔍 Поиск по контактам:", "", key="search_contacts")
+            if search_query.strip():
+                q = search_query.lower()
+                mask = contacts_df.apply(lambda row: row.astype(str).str.lower().str.contains(q).any(), axis=1)
+                filtered_contacts = contacts_df[mask]
+            else:
+                filtered_contacts = contacts_df
+
+            st.dataframe(
+                filtered_contacts,
+                use_container_width=True,
+                hide_index=True,
+                height=300
+            )
+        else:
+            st.info("Контакты пока не добавлены.")
