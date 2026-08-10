@@ -12,7 +12,6 @@ st.set_page_config(page_title="Панель управления отдела к
 
 st.markdown("""
     <style>
-    /* Центрирование и уменьшение главного заголовка */
     .custom-header {
         text-align: center;
         font-size: 1.8rem !important;
@@ -20,7 +19,6 @@ st.markdown("""
         margin-bottom: 25px;
     }
     
-    /* Переключатель отделов */
     div[data-testid="stRadio"] > label {
         display: none;
     }
@@ -33,7 +31,6 @@ st.markdown("""
         font-weight: 600 !important;
     }
 
-    /* Увеличение модальных окон до 85% экрана */
     div[role="dialog"], div[data-testid="stDialog"] > div:nth-child(2) {
         max-height: 88vh !important;
         width: 85vw !important;
@@ -41,7 +38,6 @@ st.markdown("""
         overflow-y: auto !important;
     }
 
-    /* Стили для HTML таблиц */
     .custom-table-container {
         border: 1px solid #e6e8eb;
         border-radius: 10px;
@@ -90,7 +86,6 @@ st.markdown("""
         vertical-align: middle !important;
     }
 
-    /* Компактные формы */
     .compact-form label {
         font-size: 0.78rem !important;
         margin-bottom: -4px !important;
@@ -122,7 +117,8 @@ COLUMNS = [
     'ID', 'Внешний код', 'Группа 3', 'Наименование',
     'Статус', 'Исполнитель', 'Дата взятия', 
     'Дата выполнения', 'Дата завершения работы', 
-    'Причина паузы', 'Источник', 'Дата загрузки', 'Дата паузы'
+    'Причина паузы', 'Источник', 'Дата загрузки', 'Дата паузы',
+    'Имя файла', 'Дата добавления файла', 'Статус группы'
 ]
 
 CONTACTS_SHEET_NAME = '📇 Контакты поставщиков'
@@ -131,7 +127,6 @@ CONTACT_COLUMNS = ['Производитель', 'Оф.сайт', 'Контак�
 NEW_PRODUCTS_SHEET_NAME = 'Новые товары'
 MANAGERS_SHEET_NAME = 'Менеджеры'
 
-# Основная целевая структура
 NEW_PRODUCTS_COLUMNS = [
     'Внешний код', 'Наименование', 'Дата создания', 
     'Цифровой код менеджера', 'Название раздела', 'Менеджер', 
@@ -156,10 +151,11 @@ def load_dept_data(sheet_name):
         gc = get_gspread_client()
         sh = gc.open_by_url(SPREADSHEET_URL)
         worksheet = sh.worksheet(sheet_name)
-        records = worksheet.get_all_records()
-        if records:
-            df = pd.DataFrame(records).astype(str)
-            df.columns = df.columns.astype(str).str.strip()
+        vals = worksheet.get_all_values()
+        
+        if len(vals) > 1:
+            headers = [str(h).strip() for h in vals[0]]
+            df = pd.DataFrame(vals[1:], columns=headers).astype(str)
             df = df.replace({'nan': '', 'NaN': '', 'None': '', '<NA>': '', 'NaT': ''})
             for col in COLUMNS:
                 if col not in df.columns:
@@ -171,6 +167,7 @@ def load_dept_data(sheet_name):
         return pd.DataFrame(columns=COLUMNS)
 
 def save_dept_data(dept_info, df):
+    """Надежное сохранение полного датафрейма с выравниванием колонок"""
     data_sheet_name = dept_info['data']
     workgroup_sheet_name = dept_info['workgroups']
 
@@ -181,52 +178,27 @@ def save_dept_data(dept_info, df):
         try:
             worksheet = sh.worksheet(data_sheet_name)
         except gspread.WorksheetNotFound:
-            worksheet = sh.add_worksheet(title=data_sheet_name, rows="1000", cols="20")
+            worksheet = sh.add_worksheet(title=data_sheet_name, rows="2000", cols="25")
 
-        df_to_save = df.fillna('')
-        data_to_write = [df_to_save.columns.tolist()] + df_to_save.values.tolist()
+        # Гарантируем корректность всех колонок
+        for col in COLUMNS:
+            if col not in df.columns:
+                df[col] = ''
+                
+        df_to_save = df[COLUMNS].fillna('').astype(str)
+        data_to_write = [COLUMNS] + df_to_save.values.tolist()
 
         worksheet.clear()
         worksheet.update('A1', data_to_write)
 
         try:
             wg_worksheet = sh.worksheet(workgroup_sheet_name)
-            wg_records = wg_worksheet.get_all_records()
+            summary_df = build_summary(df)
 
-            if wg_records:
-                wg_df = pd.DataFrame(wg_records)
-                wg_df.columns = wg_df.columns.astype(str).str.strip()
-                summary_df = build_summary(df)
-
-                if not summary_df.empty:
-                    group_col = None
-                    for c in ['Имя файла', 'Источник', 'Файл', 'Группа']:
-                        if c in wg_df.columns:
-                            group_col = c
-                            break
-
-                    if group_col:
-                        status_map = dict(zip(summary_df['Имя файла'], summary_df['Статус группы']))
-                        pause_map = dict(zip(summary_df['Имя файла'], summary_df['Причина паузы']))
-                        date_pause_map = dict(zip(summary_df['Имя файла'], summary_df['Дата паузы']))
-
-                        if 'Статус группы' not in wg_df.columns:
-                            wg_df['Статус группы'] = ''
-                        if 'Причина паузы' not in wg_df.columns:
-                            wg_df['Причина паузы'] = ''
-                        if 'Дата паузы' not in wg_df.columns:
-                            wg_df['Дата паузы'] = ''
-
-                        for idx, row in wg_df.iterrows():
-                            filename = str(row.get(group_col, '')).strip()
-                            if filename in status_map:
-                                wg_df.at[idx, 'Статус группы'] = status_map[filename]
-                                wg_df.at[idx, 'Причина паузы'] = pause_map.get(filename, '')
-                                wg_df.at[idx, 'Дата паузы'] = date_pause_map.get(filename, '')
-
-                        wg_data = [wg_df.columns.tolist()] + wg_df.fillna('').values.tolist()
-                        wg_worksheet.clear()
-                        wg_worksheet.update('A1', wg_data)
+            if not summary_df.empty:
+                wg_data = [summary_df.columns.tolist()] + summary_df.fillna('').astype(str).values.tolist()
+                wg_worksheet.clear()
+                wg_worksheet.update('A1', wg_data)
 
         except Exception as wg_err:
             st.warning(f"Данные сохранены, но не удалось обновить рабочий лист '{workgroup_sheet_name}': {wg_err}")
@@ -277,11 +249,7 @@ def add_contact_row(new_row_dict):
         st.error(f"Ошибка сохранения контакта: {e}")
         return False
 
-# ==========================================
-# 1.1 ОБНОВЛЕННАЯ УМНАЯ ЛОГИКА ДЛЯ "НОВЫХ ТОВАРОВ" И "МЕНЕДЖЕРОВ"
-# ==========================================
 def load_managers_mapping():
-    """Улучшенная загрузка таблицы менеджеров с обработкой типов данных"""
     try:
         gc = get_gspread_client()
         sh = gc.open_by_url(SPREADSHEET_URL)
@@ -297,12 +265,10 @@ def load_managers_mapping():
         m_df = pd.DataFrame(vals[1:], columns=vals[0]).astype(str)
         m_df.columns = m_df.columns.astype(str).str.strip()
 
-        # Умный поиск колонки кода и колонки имени
         code_col = next((c for c in m_df.columns if any(k in c.lower() for k in ['код', 'цифровой', 'id'])), m_df.columns[0])
         name_col = next((c for c in m_df.columns if any(k in c.lower() for k in ['менеджер', 'фамили', 'фио', 'имя'])), 
                         m_df.columns[1] if len(m_df.columns) > 1 else m_df.columns[0])
 
-        # Приводим коды к строке без дробной части (.0) и лишних пробелов
         keys = m_df[code_col].str.strip().str.replace(r'\.0$', '', regex=True)
         values = m_df[name_col].str.strip()
 
@@ -312,7 +278,6 @@ def load_managers_mapping():
         return {}
 
 def load_raw_new_products():
-    """Загружает все строки листа 'Новые товары' через get_all_values()"""
     try:
         gc = get_gspread_client()
         sh = gc.open_by_url(SPREADSHEET_URL)
@@ -329,9 +294,6 @@ def load_raw_new_products():
         return []
 
 def parse_new_products_by_batches():
-    """
-    Разбирает выгрузку из Google Sheets на блоки по датам загрузки.
-    """
     raw_data = load_raw_new_products()
     if not raw_data:
         return {}
@@ -364,9 +326,6 @@ def parse_new_products_by_batches():
     return batches
 
 def map_excel_columns(uploaded_df):
-    """
-    Умное сопоставление колонок из загружаемого Excel-файла с целевыми колонками
-    """
     mapped_df = pd.DataFrame()
     cols = list(uploaded_df.columns)
 
@@ -377,43 +336,29 @@ def map_excel_columns(uploaded_df):
                 return c
         return None
 
-    # 1. Внешний код
     col_code = find_col(['внешний', 'артикул', 'код товара', 'идентификатор'])
     mapped_df['Внешний код'] = uploaded_df[col_code] if col_code else (uploaded_df.iloc[:, 0] if len(cols) > 0 else '')
 
-    # 2. Наименование
     col_name = find_col(['наименование', 'название', 'номенклатура', 'товар'])
     mapped_df['Наименование'] = uploaded_df[col_name] if col_name else (uploaded_df.iloc[:, 1] if len(cols) > 1 else '')
 
-    # 3. Дата создания
     col_date = find_col(['дата созд', 'создан', 'дата'])
     mapped_df['Дата создания'] = uploaded_df[col_date] if col_date else ''
 
-    # 4. Цифровой код менеджера
     col_mgr_code = find_col(['цифровой', 'код менеджер', 'код отд', 'код кадра', 'менеджер код'])
-    if col_mgr_code:
-        mapped_df['Цифровой код менеджера'] = uploaded_df[col_mgr_code]
-    else:
-        # Попытка найти чистую числовую колонку если не найдено по названию
-        mapped_df['Цифровой код менеджера'] = ''
+    mapped_df['Цифровой код менеджера'] = uploaded_df[col_mgr_code] if col_mgr_code else ''
 
-    # 5. Название раздела
     col_sec = find_col(['раздел', 'категория', 'группа'])
     mapped_df['Название раздела'] = uploaded_df[col_sec] if col_sec else ''
 
-    # 6. Контент
     col_cnt = find_col(['контент', 'описание', 'статус контент'])
     mapped_df['Контент'] = uploaded_df[col_cnt] if col_cnt else ''
 
-    # 7. Менеджер (подтянем позже)
     mapped_df['Менеджер'] = ''
 
     return mapped_df
 
 def append_new_products(uploaded_df):
-    """
-    Добавляет новую партию с умным сопоставлением колонок и автоподстановкой Менеджера (ВПР)
-    """
     try:
         gc = get_gspread_client()
         sh = gc.open_by_url(SPREADSHEET_URL)
@@ -423,24 +368,16 @@ def append_new_products(uploaded_df):
             worksheet = sh.add_worksheet(title=NEW_PRODUCTS_SHEET_NAME, rows="1000", cols="10")
             worksheet.append_row(NEW_PRODUCTS_COLUMNS)
 
-        # 1. Приводим загруженные данные к правильной структуре
         formatted_df = map_excel_columns(uploaded_df)
-
-        # 2. Очищаем типы данных от NaN
         formatted_df = formatted_df.astype(str).replace({'nan': '', 'NaN': '', 'None': '', '<NA>': '', 'NaT': ''})
-
-        # 3. Нормализуем цифровой код менеджера (убираем .0 при импорте чисел из Excel)
         formatted_df['Цифровой код менеджера'] = (
             formatted_df['Цифровой код менеджера']
             .str.strip()
             .str.replace(r'\.0$', '', regex=True)
         )
 
-        # 4. Выполняем автоподстановку менеджера
         managers_map = load_managers_mapping()
         formatted_df['Менеджер'] = formatted_df['Цифровой код менеджера'].map(managers_map).fillna('')
-
-        # 5. Гарантируем порядок колонок
         formatted_df = formatted_df[NEW_PRODUCTS_COLUMNS]
 
         now_str = datetime.datetime.now().strftime("%d.%m.%Y %H:%M")
@@ -984,8 +921,13 @@ with col_upload:
                 if col not in uploaded_df.columns:
                     uploaded_df[col] = ''
 
-            new_df = pd.concat([df, uploaded_df], ignore_index=True)
-            if save_dept_data(dept_info, new_df):
+            # Объединяем существующие данные с новыми
+            if not df.empty:
+                merged_df = pd.concat([df, uploaded_df], ignore_index=True)
+            else:
+                merged_df = uploaded_df
+
+            if save_dept_data(dept_info, merged_df):
                 st.success(f"Файл '{uploaded_file.name}' успешно сохранен!")
                 st.rerun()
 
