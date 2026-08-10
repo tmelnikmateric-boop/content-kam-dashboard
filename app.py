@@ -9,7 +9,7 @@ import streamlit as st
 # 0. НАСТРОЙКА СТРАНИЦЫ И СТИЛЕЙ
 # ==========================================
 st.set_page_config(
-    page_title="Панель управления отдела контента!!!", layout="wide"
+    page_title="Панель управления отдела контента", layout="wide"
 )
 
 st.markdown(
@@ -1133,7 +1133,7 @@ def modal_new_products():
 # ==========================================
 
 st.markdown(
-    "<h2 class='custom-header'>Панель управления отдела контента!!!</h2>",
+    "<h2 class='custom-header'>Панель управления отдела контента</h2>",
     unsafe_allow_html=True,
 )
 
@@ -1151,18 +1151,7 @@ df = load_dept_data(dept_info['data'])
 
 # 2. Динамически рассчитываем сводку
 summary_df = build_summary(df)
-# --- ВРЕМЕННАЯ ДИАГНОСТИКА ---
-with st.expander('🔍 Отладка загрузки данных', expanded=True):
-  st.write(f'**Текущий отдел:** {dept}')
-  st.write(f'**Имя листа:** {dept_info["data"]}')
-  st.write(f'**Загружено строк из таблицы (df):** {len(df)}')
-  st.write(f'**Названия колонок в df:** {list(df.columns)}')
-  if not df.empty:
-    st.write('**Первые 3 строки сырых данных:**')
-    st.dataframe(df.head(3))
-    st.write(f'**Уникальные значения в "Источник":** {df["Источник"].unique()}')
-    st.write(f'**Уникальные значения в "Статус":** {df["Статус"].unique()}')
-# ------------------------------
+
 st.divider()
 
 col_upload, col_actions, col_extra = st.columns([1.2, 1.8, 1.3])
