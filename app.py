@@ -124,7 +124,7 @@ COLUMNS = [
     'Дата загрузки',
 ]
 
-CONTACTS_SHEET_NAME = '📇 Контакты поставщиков!'
+CONTACTS_SHEET_NAME = '📇 Контакты поставщиков'
 CONTACT_COLUMNS = [
     'Производитель',
     'Оф.сайт',
@@ -1133,7 +1133,7 @@ def modal_new_products():
 # ==========================================
 
 st.markdown(
-    "<h2 class='custom-header'>Панель управления отдела контента</h2>",
+    "<h2 class='custom-header'>Панель управления отдела контента!!!</h2>",
     unsafe_allow_html=True,
 )
 
