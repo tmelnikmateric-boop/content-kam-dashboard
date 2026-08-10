@@ -461,8 +461,10 @@ def map_excel_columns(uploaded_df):
   return mapped_df
 
 
-def append_new_products_batch(uploaded_files):
-  """Добавление нескольких файлов в лист 'Новые товары'."""
+def append_new_products_batch(
+    uploaded_files, progress_bar=None, status_text=None
+):
+  """Добавление нескольких файлов в лист 'Новые товары' с градусником загрузки."""
   try:
     gc = get_gspread_client()
     sh = gc.open_by_url(SPREADSHEET_URL)
@@ -478,8 +480,15 @@ def append_new_products_batch(uploaded_files):
     now_str = datetime.datetime.now().strftime('%d.%m.%Y %H:%M')
 
     all_rows_to_append = []
+    total_files = len(uploaded_files)
 
-    for u_file in uploaded_files:
+    for idx, u_file in enumerate(uploaded_files):
+      if status_text:
+        status_text.info(
+            f'Чтение файла {idx + 1} из {total_files}: **{u_file.name}**'
+        )
+
+      u_file.seek(0)  # Сброс указателя потока файла
       raw_df = pd.read_excel(u_file)
       formatted_df = map_excel_columns(raw_df)
       formatted_df = formatted_df.astype(str).replace(
@@ -502,8 +511,15 @@ def append_new_products_batch(uploaded_files):
       all_rows_to_append.append(date_header_row)
       all_rows_to_append.extend(formatted_df.values.tolist())
 
+      if progress_bar:
+        progress_bar.progress(int(((idx + 1) / total_files) * 75))
+
     if all_rows_to_append:
+      if status_text:
+        status_text.info('Запись данных в Google Таблицу...')
       worksheet.append_rows(all_rows_to_append)
+      if progress_bar:
+        progress_bar.progress(100)
 
     return True
   except Exception as e:
@@ -1015,7 +1031,7 @@ def modal_contacts():
   col_search, _ = st.columns([2, 1])
   with col_search:
     search_query = st.text_input(
-        '🔍 Быстрый поиск:', "", placeholder='Введите текст для фильтрации...'
+        '🔍 Быстрый поиск:', '', placeholder='Введите текст для фильтрации...'
     )
 
   if not contacts_df.empty:
@@ -1073,11 +1089,19 @@ def modal_new_products():
         f'🚀 Добавить выгрузки в таблицу ({len(uploaded_files)})',
         use_container_width=True,
     ):
+      progress_bar = st.progress(0)
+      status_text = st.empty()
       try:
-        if append_new_products_batch(uploaded_files):
-          st.success(f'Успешно добавлено файлов: {len(uploaded_files)}!')
+        if append_new_products_batch(
+            uploaded_files, progress_bar, status_text
+        ):
+          status_text.success(
+              f'Успешно добавлено файлов: {len(uploaded_files)}!'
+          )
           st.rerun()
       except Exception as e:
+        status_text.empty()
+        progress_bar.empty()
         st.error(f'Ошибка обработки файлов: {e}')
 
   st.divider()
@@ -1179,27 +1203,49 @@ with col_upload:
     ):
       now_str = datetime.datetime.now().strftime('%d.%m.%Y %H:%M:%S')
       all_dfs = []
+      total_files = len(uploaded_files)
 
-      for u_file in uploaded_files:
-        raw_uploaded_df = pd.read_excel(u_file)
+      # Индикация процесса (градусник)
+      progress_bar = st.progress(0)
+      status_text = st.empty()
 
-        # Формируем структуру с использованием Источник и Дата загрузки
-        uploaded_df = map_excel_columns(raw_uploaded_df)
-        uploaded_df['Источник'] = u_file.name
-        uploaded_df['Дата загрузки'] = now_str
-        uploaded_df['Статус'] = 'Новый'
+      try:
+        for idx, u_file in enumerate(uploaded_files):
+          status_text.info(
+              f'Чтение файла {idx + 1} из {total_files}: **{u_file.name}**'
+          )
 
-        for col in COLUMNS:
-          if col not in uploaded_df.columns:
-            uploaded_df[col] = ''
+          # Сбрасываем указатель файла перед считыванием, чтобы не было ошибок пустых буферов
+          u_file.seek(0)
+          raw_uploaded_df = pd.read_excel(u_file)
 
-        all_dfs.append(uploaded_df[COLUMNS])
+          # Формируем структуру с использованием Источник и Дата загрузки
+          uploaded_df = map_excel_columns(raw_uploaded_df)
+          uploaded_df['Источник'] = u_file.name
+          uploaded_df['Дата загрузки'] = now_str
+          uploaded_df['Статус'] = 'Новый'
 
-      if all_dfs:
-        combined_df = pd.concat(all_dfs, ignore_index=True)
-        if save_dept_data(dept_info, combined_df):
-          st.success(f'Успешно загружено файлов: {len(uploaded_files)}!')
-          st.rerun()
+          for col in COLUMNS:
+            if col not in uploaded_df.columns:
+              uploaded_df[col] = ''
+
+          all_dfs.append(uploaded_df[COLUMNS])
+          progress_bar.progress(int(((idx + 1) / total_files) * 60))
+
+        if all_dfs:
+          status_text.info('Сохранение и запись данных в Google Таблицу...')
+          combined_df = pd.concat(all_dfs, ignore_index=True)
+
+          progress_bar.progress(80)
+          if save_dept_data(dept_info, combined_df):
+            progress_bar.progress(100)
+            status_text.success(f'Успешно загружено файлов: {total_files}!')
+            st.rerun()
+
+      except Exception as e:
+        status_text.empty()
+        progress_bar.empty()
+        st.error(f'Ошибка обработки файлов: {e}')
 
 with col_actions:
   st.subheader('2. Управление статусами')
