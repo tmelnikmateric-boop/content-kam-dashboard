@@ -102,7 +102,7 @@ SHEET_MAP = {
         'data': '📥 Загруженные данные контента',
         'workgroups': '👥 Рабочие группы контента'
     },
-    'Отдел маркетинга': {
+    'Коммерческий отдел': {
         'data': '📥 Загруженные данные КАМ',
         'workgroups': '👥 Рабочие группы КАМ'
     }
@@ -540,7 +540,7 @@ def modal_complete(dept_info, summary_df, df):
 def modal_analytics():
     with st.spinner("Сбор статистики..."):
         df_content = load_dept_data(SHEET_MAP['Отдел контента']['data'])
-        df_marketing = load_dept_data(SHEET_MAP['Отдел маркетинга']['data'])
+        df_marketing = load_dept_data(SHEET_MAP['Коммерческий отдел']['data'])
 
         summary_content = build_summary(df_content)
         summary_marketing = build_summary(df_marketing)
@@ -552,7 +552,7 @@ def modal_analytics():
         st.markdown("<h4 style='font-weight: 500; font-size: 1.05rem; margin-bottom: 12px;'>🆕 Новые SKU на добавление</h4>", unsafe_allow_html=True)
         col_m1, col_m2 = st.columns(2)
         col_m1.metric("Отдел контента", f"{new_content_sku} SKU")
-        col_m2.metric("Отдел маркетинга", f"{new_marketing_sku} SKU")
+        col_m2.metric("Коммерческий отдел", f"{new_marketing_sku} SKU")
 
         st.divider()
 
@@ -561,7 +561,7 @@ def modal_analytics():
             summary_content['Отдел'] = 'Отдел контента'
             combined_summaries.append(summary_content)
         if not summary_marketing.empty:
-            summary_marketing['Отдел'] = 'Отдел маркетинга'
+            summary_marketing['Отдел'] = 'Коммерческий отдел'
             combined_summaries.append(summary_marketing)
 
         if combined_summaries:
@@ -687,7 +687,7 @@ st.markdown("<h2 class='custom-header'>Панель управления отд�
 
 dept = st.radio(
     "Выберите отдел:", 
-    options=['Отдел контента', 'Отдел маркетинга'], 
+    options=['Отдел контента', 'Коммерческий отдел'], 
     horizontal=True,
     label_visibility="collapsed"
 )
