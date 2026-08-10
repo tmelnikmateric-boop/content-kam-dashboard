@@ -188,7 +188,6 @@ def save_dept_data(dept_info, df):
             old_headers = [str(h).strip() for h in existing_vals[0]]
             old_data_df = pd.DataFrame(existing_vals[1:], columns=old_headers).astype(str)
             
-            # Объединяем существующие данные с обновляемым df
             for col in COLUMNS:
                 if col not in old_data_df.columns:
                     old_data_df[col] = ''
@@ -196,10 +195,11 @@ def save_dept_data(dept_info, df):
                     df[col] = ''
 
             # Исключаем из старых данных обновленные файлы
-            source_col = 'Имя файла' if 'Имя файла' in df.columns else 'Источник'
-            updated_files = df[source_col].unique()
+            source_col = 'Имя файла'
+            updated_files = df[source_col].replace('', np.nan).fillna(df['Источник']).unique()
             
-            old_filtered = old_data_df[~old_data_df[source_col].isin(updated_files)]
+            old_source = old_data_df[source_col].replace('', np.nan).fillna(old_data_df['Источник'])
+            old_filtered = old_data_df[~old_source.isin(updated_files)]
             full_df = pd.concat([old_filtered, df[COLUMNS]], ignore_index=True)
         else:
             full_df = df[COLUMNS]
@@ -208,7 +208,7 @@ def save_dept_data(dept_info, df):
         data_to_write = [COLUMNS] + full_df.values.tolist()
 
         worksheet.clear()
-        worksheet.update('A1', data_to_write)
+        worksheet.update(range_name='A1', values=data_to_write)
 
         # 2. Пересчитываем сводный реестр из ВСЕХ накопленных данных
         try:
@@ -222,7 +222,7 @@ def save_dept_data(dept_info, df):
             if not full_summary_df.empty:
                 wg_data = [full_summary_df.columns.tolist()] + full_summary_df.fillna('').astype(str).values.tolist()
                 wg_worksheet.clear()
-                wg_worksheet.update('A1', wg_data)
+                wg_worksheet.update(range_name='A1', values=wg_data)
 
         except Exception as wg_err:
             st.warning(f"Основные данные сохранены, но не удалось обновить сводный лист '{workgroup_sheet_name}': {wg_err}")
@@ -366,14 +366,14 @@ def map_excel_columns(uploaded_df):
     col_name = find_col(['наименование', 'название', 'номенклатура', 'товар'])
     mapped_df['Наименование'] = uploaded_df[col_name] if col_name else (uploaded_df.iloc[:, 1] if len(cols) > 1 else '')
 
+    col_sec = find_col(['группа 3', 'раздел', 'категория', 'группа'])
+    mapped_df['Группа 3'] = uploaded_df[col_sec] if col_sec else ''
+
     col_date = find_col(['дата созд', 'создан', 'дата'])
     mapped_df['Дата создания'] = uploaded_df[col_date] if col_date else ''
 
     col_mgr_code = find_col(['цифровой', 'код менеджер', 'код отд', 'код кадра', 'менеджер код'])
     mapped_df['Цифровой код менеджера'] = uploaded_df[col_mgr_code] if col_mgr_code else ''
-
-    col_sec = find_col(['раздел', 'категория', 'группа'])
-    mapped_df['Название раздела'] = uploaded_df[col_sec] if col_sec else ''
 
     col_cnt = find_col(['контент', 'описание', 'статус контент'])
     mapped_df['Контент'] = uploaded_df[col_cnt] if col_cnt else ''
@@ -432,22 +432,27 @@ def calculate_business_days(date_str):
         return 0
 
 def build_summary(df):
-    source_col = None
-    for col in ['Имя файла', 'Источник', 'Файл']:
-        if col in df.columns:
-            source_col = col
-            break
+    if df.empty:
+        return pd.DataFrame()
 
-    if df.empty or not source_col:
+    temp_df = df.copy()
+    
+    # Унифицируем имена файлов, исключая ситуацию пустого 'Имя файла'
+    if 'Имя файла' in temp_df.columns and 'Источник' in temp_df.columns:
+        temp_df['Имя файла'] = temp_df['Имя файла'].astype(str).str.strip().replace('', np.nan).fillna(temp_df['Источник'])
+    elif 'Источник' in temp_df.columns:
+        temp_df['Имя файла'] = temp_df['Источник']
+    
+    temp_df['Имя файла'] = temp_df['Имя файла'].astype(str).str.strip()
+    temp_df = temp_df[temp_df['Имя файла'].replace({'nan': '', 'None': '', '<NA>': ''}) != '']
+
+    if temp_df.empty:
         return pd.DataFrame()
 
     summary_rows = []
-    grouped = df.groupby(source_col, sort=False)
+    grouped = temp_df.groupby('Имя файла', sort=False)
 
     for idx, (filename, group) in enumerate(grouped, start=1):
-        if not str(filename).strip():
-            continue
-
         total = len(group)
         first_row = group.iloc[0]
 
@@ -576,9 +581,8 @@ def modal_take_in_work(dept_info, summary_df, df):
         elif not executor_name.strip():
             st.warning("Укажите имя исполнителя!")
         else:
-            source_col = 'Имя файла' if 'Имя файла' in df.columns else 'Источник'
             now_str = datetime.datetime.now().strftime("%d.%m.%Y %H:%M:%S")
-            mask = df[source_col].isin(selected_files)
+            mask = df['Имя файла'].isin(selected_files) | df['Источник'].isin(selected_files)
 
             df.loc[mask, 'Статус'] = 'В работе'
             df.loc[mask, 'Статус группы'] = '🔄 В работе'
@@ -614,9 +618,8 @@ def modal_pause(dept_info, summary_df, df):
         if not selected_files:
             st.warning("Отметьте хотя бы один файл!")
         else:
-            source_col = 'Имя файла' if 'Имя файла' in df.columns else 'Источник'
             now_str = datetime.datetime.now().strftime("%d.%m.%Y %H:%M:%S")
-            mask = df[source_col].isin(selected_files)
+            mask = df['Имя файла'].isin(selected_files) | df['Источник'].isin(selected_files)
 
             df.loc[mask, 'Статус'] = '⏸️ На паузе'
             df.loc[mask, 'Статус группы'] = '⏸️ На паузе'
@@ -648,8 +651,7 @@ def modal_unpause(dept_info, summary_df, df):
         if not selected_files:
             st.warning("Отметьте хотя бы один файл!")
         else:
-            source_col = 'Имя файла' if 'Имя файла' in df.columns else 'Источник'
-            mask = df[source_col].isin(selected_files)
+            mask = df['Имя файла'].isin(selected_files) | df['Источник'].isin(selected_files)
 
             df.loc[mask, 'Статус'] = 'В работе'
             df.loc[mask, 'Статус группы'] = '🔄 В работе'
@@ -681,9 +683,8 @@ def modal_complete(dept_info, summary_df, df):
         if not selected_files:
             st.warning("Отметьте хотя бы один файл!")
         else:
-            source_col = 'Имя файла' if 'Имя файла' in df.columns else 'Источник'
             now_str = datetime.datetime.now().strftime("%d.%m.%Y %H:%M:%S")
-            mask = df[source_col].isin(selected_files)
+            mask = df['Имя файла'].isin(selected_files) | df['Источник'].isin(selected_files)
 
             df.loc[mask, 'Статус'] = '✅ Выполнен'
             df.loc[mask, 'Статус группы'] = '✅ Выполнен'
@@ -923,20 +924,8 @@ dept_info = SHEET_MAP[dept]
 # 1. Загружаем сырые данные из Гугл Таблицы
 df = load_dept_data(dept_info['data'])
 
-# 2. Пересчитываем или забираем свежую сводку из Google Таблицы напрямую
-try:
-    gc = get_gspread_client()
-    sh = gc.open_by_url(SPREADSHEET_URL)
-    wg_worksheet = sh.worksheet(dept_info['workgroups'])
-    wg_vals = wg_worksheet.get_all_values()
-    if len(wg_vals) > 1:
-        summary_df = pd.DataFrame(wg_vals[1:], columns=[str(h).strip() for h in wg_vals[0]]).astype(str)
-        if 'Количество товаров' in summary_df.columns:
-            summary_df['Количество товаров'] = pd.to_numeric(summary_df['Количество товаров'], errors='coerce').fillna(0).astype(int)
-    else:
-        summary_df = build_summary(df)
-except Exception:
-    summary_df = build_summary(df)
+# 2. Всегда динамически рассчитываем актуальную сводку из данных
+summary_df = build_summary(df)
 
 st.divider()
 
@@ -947,7 +936,10 @@ with col_upload:
     uploaded_file = st.file_uploader(f"Выберите .xlsx / .xls файл для {dept.lower()}", type=['xlsx', 'xls'])
     if uploaded_file is not None:
         if st.button(f"Загрузить файл {dept.lower()}", use_container_width=True):
-            uploaded_df = pd.read_excel(uploaded_file)
+            raw_uploaded_df = pd.read_excel(uploaded_file)
+            
+            # Маппим колонки для сохранения импортированных полей
+            uploaded_df = map_excel_columns(raw_uploaded_df)
             now_str = datetime.datetime.now().strftime("%d.%m.%Y %H:%M:%S")
 
             uploaded_df['Имя файла'] = uploaded_file.name
@@ -960,7 +952,6 @@ with col_upload:
                 if col not in uploaded_df.columns:
                     uploaded_df[col] = ''
 
-            # Сохраняем ТОЛЬКО новые загруженные строки через бережную функцию save_dept_data
             if save_dept_data(dept_info, uploaded_df):
                 st.success(f"Файл '{uploaded_file.name}' успешно сохранен!")
                 st.rerun()
@@ -1008,11 +999,10 @@ if summary_df.empty:
 else:
     st.subheader(f"📋 Реестр групп — {dept.upper()}")
 
-    # Фильтрация по статусам с учетом возможных префиксов и пробелов
-    new_df = summary_df[summary_df['Статус группы'].str.contains('Нов|🆕', case=False, na=False)].copy().reset_index(drop=True)
-    paused_df = summary_df[summary_df['Статус группы'].str.contains('пауз|⏸', case=False, na=False)].copy().reset_index(drop=True)
-    work_df = summary_df[summary_df['Статус группы'].str.contains('работ|🔄', case=False, na=False)].copy().reset_index(drop=True)
-    completed_summary = summary_df[summary_df['Статус группы'].str.contains('выполн|заверш|✅', case=False, na=False)].copy().reset_index(drop=True)
+    new_df = summary_df[summary_df['Статус группы'] == '🆕 Новая'].copy().reset_index(drop=True)
+    paused_df = summary_df[summary_df['Статус группы'] == '⏸️ На паузе'].copy().reset_index(drop=True)
+    work_df = summary_df[summary_df['Статус группы'] == '🔄 В работе'].copy().reset_index(drop=True)
+    completed_summary = summary_df[summary_df['Статус группы'] == '✅ Выполнен'].copy().reset_index(drop=True)
 
     tab_new, tab_paused, tab_work = st.tabs([
         f"🆕 Новые ({len(new_df)})", 
