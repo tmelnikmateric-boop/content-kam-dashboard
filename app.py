@@ -124,7 +124,7 @@ COLUMNS = [
     'Дата загрузки',
 ]
 
-CONTACTS_SHEET_NAME = '📇 Контакты поставщиков'
+CONTACTS_SHEET_NAME = '📇 Контакты поставщиков!'
 CONTACT_COLUMNS = [
     'Производитель',
     'Оф.сайт',
