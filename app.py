@@ -109,7 +109,6 @@ SHEET_MAP = {
     },
 }
 
-# Точный список столбцов под вашу Гугл Таблицу
 COLUMNS = [
     'ID',
     'Внешний код',
@@ -462,7 +461,8 @@ def map_excel_columns(uploaded_df):
   return mapped_df
 
 
-def append_new_products(uploaded_df):
+def append_new_products_batch(uploaded_files):
+  """Добавление нескольких файлов в лист 'Новые товары'."""
   try:
     gc = get_gspread_client()
     sh = gc.open_by_url(SPREADSHEET_URL)
@@ -474,29 +474,36 @@ def append_new_products(uploaded_df):
       )
       worksheet.append_row(NEW_PRODUCTS_COLUMNS)
 
-    formatted_df = map_excel_columns(uploaded_df)
-    formatted_df = formatted_df.astype(str).replace(
-        {'nan': '', 'NaN': '', 'None': '', '<NA>': '', 'NaT': ''}
-    )
-    formatted_df['Цифровой код менеджера'] = (
-        formatted_df['Цифровой код менеджера']
-        .str.strip()
-        .str.replace(r'\.0$', '', regex=True)
-    )
-
     managers_map = load_managers_mapping()
-    formatted_df['Менеджер'] = (
-        formatted_df['Цифровой код менеджера'].map(managers_map).fillna('')
-    )
-    formatted_df = formatted_df[NEW_PRODUCTS_COLUMNS]
-
     now_str = datetime.datetime.now().strftime('%d.%m.%Y %H:%M')
-    date_header_row = [f'📅 Загрузка от {now_str}'] + [''] * (
-        len(NEW_PRODUCTS_COLUMNS) - 1
-    )
 
-    rows_to_append = [date_header_row] + formatted_df.values.tolist()
-    worksheet.append_rows(rows_to_append)
+    all_rows_to_append = []
+
+    for u_file in uploaded_files:
+      raw_df = pd.read_excel(u_file)
+      formatted_df = map_excel_columns(raw_df)
+      formatted_df = formatted_df.astype(str).replace(
+          {'nan': '', 'NaN': '', 'None': '', '<NA>': '', 'NaT': ''}
+      )
+      formatted_df['Цифровой код менеджера'] = (
+          formatted_df['Цифровой код менеджера']
+          .str.strip()
+          .str.replace(r'\.0$', '', regex=True)
+      )
+
+      formatted_df['Менеджер'] = (
+          formatted_df['Цифровой код менеджера'].map(managers_map).fillna('')
+      )
+      formatted_df = formatted_df[NEW_PRODUCTS_COLUMNS]
+
+      date_header_row = [f'📅 Загрузка от {now_str} ({u_file.name})'] + [''] * (
+          len(NEW_PRODUCTS_COLUMNS) - 1
+      )
+      all_rows_to_append.append(date_header_row)
+      all_rows_to_append.extend(formatted_df.values.tolist())
+
+    if all_rows_to_append:
+      worksheet.append_rows(all_rows_to_append)
 
     return True
   except Exception as e:
@@ -528,7 +535,6 @@ def build_summary(df):
 
   temp_df = df.copy()
 
-  # Выделяем ключевое поле для группировки — Источник
   if 'Источник' in temp_df.columns:
     source_series = temp_df['Источник'].astype(str).str.strip()
   elif 'Имя файла' in temp_df.columns:
@@ -610,7 +616,6 @@ def build_summary(df):
     elif is_in_work:
       done_cnt, in_work_cnt, new_cnt, group_status = 0, total, 0, '🔄 В работе'
     else:
-      # По умолчанию статус «новый» или любой другой относим к «🆕 Новый»
       done_cnt, in_work_cnt, new_cnt, group_status = 0, 0, total, '🆕 Новый'
 
     days_passed = calculate_business_days(date_added)
@@ -1052,23 +1057,28 @@ def modal_contacts():
 def modal_new_products():
   st.markdown(
       "<h4 style='font-weight: 500; font-size: 1.05rem; margin-top: 5px;"
-      " margin-bottom: 12px;'>📥 Загрузить новый файл</h4>",
+      " margin-bottom: 12px;'>📥 Загрузить файлы (пакетно)</h4>",
       unsafe_allow_html=True,
   )
 
-  uploaded_file = st.file_uploader(
-      'Выберите .xlsx / .xls файл', type=['xlsx', 'xls'], key='new_prod_file'
+  uploaded_files = st.file_uploader(
+      'Выберите .xlsx / .xls файлы',
+      type=['xlsx', 'xls'],
+      accept_multiple_files=True,
+      key='new_prod_file',
   )
 
-  if uploaded_file is not None:
-    if st.button('🚀 Добавить выгрузку в таблицу', use_container_width=True):
+  if uploaded_files:
+    if st.button(
+        f'🚀 Добавить выгрузки в таблицу ({len(uploaded_files)})',
+        use_container_width=True,
+    ):
       try:
-        new_products_df = pd.read_excel(uploaded_file)
-        if append_new_products(new_products_df):
-          st.success(f"Выгрузка '{uploaded_file.name}' успешно добавлена!")
+        if append_new_products_batch(uploaded_files):
+          st.success(f'Успешно добавлено файлов: {len(uploaded_files)}!')
           st.rerun()
       except Exception as e:
-        st.error(f'Ошибка чтения файла: {e}')
+        st.error(f'Ошибка обработки файлов: {e}')
 
   st.divider()
 
@@ -1157,29 +1167,39 @@ st.divider()
 col_upload, col_actions, col_extra = st.columns([1.2, 1.8, 1.3])
 
 with col_upload:
-  st.subheader(f'1. Загрузка файла ({dept.lower()})')
-  uploaded_file = st.file_uploader(
-      f'Выберите .xlsx / .xls файл для {dept.lower()}', type=['xlsx', 'xls']
+  st.subheader(f'1. Загрузка файлов ({dept.lower()})')
+  uploaded_files = st.file_uploader(
+      f'Выберите .xlsx / .xls файлы для {dept.lower()}',
+      type=['xlsx', 'xls'],
+      accept_multiple_files=True,
   )
-  if uploaded_file is not None:
-    if st.button(f'Загрузить файл {dept.lower()}', use_container_width=True):
-      raw_uploaded_df = pd.read_excel(uploaded_file)
-
-      # Формируем структуру с использованием Источник и Дата загрузки
-      uploaded_df = map_excel_columns(raw_uploaded_df)
+  if uploaded_files:
+    if st.button(
+        f'Загрузить файлы ({len(uploaded_files)})', use_container_width=True
+    ):
       now_str = datetime.datetime.now().strftime('%d.%m.%Y %H:%M:%S')
+      all_dfs = []
 
-      uploaded_df['Источник'] = uploaded_file.name
-      uploaded_df['Дата загрузки'] = now_str
-      uploaded_df['Статус'] = 'Новый'
+      for u_file in uploaded_files:
+        raw_uploaded_df = pd.read_excel(u_file)
 
-      for col in COLUMNS:
-        if col not in uploaded_df.columns:
-          uploaded_df[col] = ''
+        # Формируем структуру с использованием Источник и Дата загрузки
+        uploaded_df = map_excel_columns(raw_uploaded_df)
+        uploaded_df['Источник'] = u_file.name
+        uploaded_df['Дата загрузки'] = now_str
+        uploaded_df['Статус'] = 'Новый'
 
-      if save_dept_data(dept_info, uploaded_df):
-        st.success(f"Файл '{uploaded_file.name}' успешно сохранен!")
-        st.rerun()
+        for col in COLUMNS:
+          if col not in uploaded_df.columns:
+            uploaded_df[col] = ''
+
+        all_dfs.append(uploaded_df[COLUMNS])
+
+      if all_dfs:
+        combined_df = pd.concat(all_dfs, ignore_index=True)
+        if save_dept_data(dept_info, combined_df):
+          st.success(f'Успешно загружено файлов: {len(uploaded_files)}!')
+          st.rerun()
 
 with col_actions:
   st.subheader('2. Управление статусами')
