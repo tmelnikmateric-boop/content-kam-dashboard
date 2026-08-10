@@ -33,11 +33,11 @@ st.markdown("""
         font-weight: 600 !important;
     }
 
-    /* Увеличение модальных окон до 80% экрана */
+    /* Увеличение модальных окон до 85% экрана */
     div[role="dialog"], div[data-testid="stDialog"] > div:nth-child(2) {
-        max-height: 85vh !important;
-        width: 80vw !important;
-        max-width: 80vw !important;
+        max-height: 88vh !important;
+        width: 85vw !important;
+        max-width: 85vw !important;
         overflow-y: auto !important;
     }
 
@@ -88,6 +88,16 @@ st.markdown("""
         font-weight: 500 !important;
         color: #2c3e50 !important;
         vertical-align: middle !important;
+    }
+
+    /* Оптимизация компактности формы */
+    .compact-form label {
+        font-size: 0.78rem !important;
+        margin-bottom: -4px !important;
+    }
+    .compact-form input {
+        padding: 4px 8px !important;
+        font-size: 0.85rem !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -540,19 +550,19 @@ def modal_complete(dept_info, summary_df, df):
 def modal_analytics():
     with st.spinner("Сбор статистики..."):
         df_content = load_dept_data(SHEET_MAP['Отдел контента']['data'])
-        df_marketing = load_dept_data(SHEET_MAP['Коммерческий отдел']['data'])
+        df_comm = load_dept_data(SHEET_MAP['Коммерческий отдел']['data'])
 
         summary_content = build_summary(df_content)
-        summary_marketing = build_summary(df_marketing)
+        summary_comm = build_summary(df_comm)
 
     with st.container(height=650):
         new_content_sku = summary_content[summary_content['Статус группы'] == '🆕 Новая']['Количество товаров'].sum() if not summary_content.empty else 0
-        new_marketing_sku = summary_marketing[summary_marketing['Статус группы'] == '🆕 Новая']['Количество товаров'].sum() if not summary_marketing.empty else 0
+        new_comm_sku = summary_comm[summary_comm['Статус группы'] == '🆕 Новая']['Количество товаров'].sum() if not summary_comm.empty else 0
 
         st.markdown("<h4 style='font-weight: 500; font-size: 1.05rem; margin-bottom: 12px;'>🆕 Новые SKU на добавление</h4>", unsafe_allow_html=True)
         col_m1, col_m2 = st.columns(2)
         col_m1.metric("Отдел контента", f"{new_content_sku} SKU")
-        col_m2.metric("Коммерческий отдел", f"{new_marketing_sku} SKU")
+        col_m2.metric("Коммерческий отдел", f"{new_comm_sku} SKU")
 
         st.divider()
 
@@ -560,9 +570,9 @@ def modal_analytics():
         if not summary_content.empty:
             summary_content['Отдел'] = 'Отдел контента'
             combined_summaries.append(summary_content)
-        if not summary_marketing.empty:
-            summary_marketing['Отдел'] = 'Коммерческий отдел'
-            combined_summaries.append(summary_marketing)
+        if not summary_comm.empty:
+            summary_comm['Отдел'] = 'Коммерческий отдел'
+            combined_summaries.append(summary_comm)
 
         if combined_summaries:
             all_summary = pd.concat(combined_summaries, ignore_index=True)
@@ -624,45 +634,49 @@ def modal_analytics():
 
 @st.dialog("📇 Контакты поставщиков")
 def modal_contacts():
-    st.markdown("<h4 style='font-weight: 500; font-size: 1.05rem; margin-top: 5px; margin-bottom: 12px;'>➕ Добавить новый контакт</h4>", unsafe_allow_html=True)
-    
-    with st.form("add_contact_form", clear_on_submit=True):
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            producer = st.text_input("Производитель")
-            name = st.text_input("Имя")
-        with c2:
-            site = st.text_input("Оф.сайт")
-            groups = st.text_input("Группы товаров")
-        with c3:
-            contact_info = st.text_input("Контакт")
-            note = st.text_input("Примечание")
+    # 1. Компактный формуляр добавления контактов вводом в одну строку
+    with st.expander("➕ Добавить новый контакт поставщика", expanded=False):
+        with st.form("add_contact_form", clear_on_submit=True):
+            f_col1, f_col2, f_col3, f_col4, f_col5, f_col6 = st.columns([1.2, 1.2, 1.2, 1.2, 1.5, 2.0])
+            with f_col1:
+                producer = st.text_input("Производитель", placeholder="Название")
+            with f_col2:
+                site = st.text_input("Оф.сайт", placeholder="URL / сайт")
+            with f_col3:
+                contact_info = st.text_input("Контакт", placeholder="Тел / Email")
+            with f_col4:
+                name = st.text_input("Имя", placeholder="Контактное лицо")
+            with f_col5:
+                groups = st.text_input("Группы товаров", placeholder="Категории")
+            with f_col6:
+                note = st.text_input("Примечание", placeholder="Доп. информация")
 
-        submit_contact = st.form_submit_button("Сохранить контакт", use_container_width=True)
+            btn_submit = st.form_submit_button("Сохранить контакт", use_container_width=True)
 
-        if submit_contact:
-            if not producer.strip() and not name.strip():
-                st.warning("Заполните хотя бы 'Производитель' или 'Имя'!")
-            else:
-                new_contact = {
-                    'Производитель': producer,
-                    'Оф.сайт': site,
-                    'Контакт': contact_info,
-                    'Имя': name,
-                    'Группы товаров': groups,
-                    'Примечание': note
-                }
-                if add_contact_row(new_contact):
-                    st.success("Контакт успешно добавлен!")
-                    st.rerun()
+            if btn_submit:
+                if not producer.strip() and not name.strip():
+                    st.warning("Укажите хотя бы 'Производитель' или 'Имя'!")
+                else:
+                    new_contact = {
+                        'Производитель': producer,
+                        'Оф.сайт': site,
+                        'Контакт': contact_info,
+                        'Имя': name,
+                        'Группы товаров': groups,
+                        'Примечание': note
+                    }
+                    if add_contact_row(new_contact):
+                        st.success("Контакт сохранен!")
+                        st.rerun()
 
-    st.divider()
-
-    st.markdown("<h4 style='font-weight: 500; font-size: 1.05rem; margin-bottom: 12px;'>📋 Список контактов поставщиков</h4>", unsafe_allow_html=True)
+    # 2. Быстрый поиск по таблице
     contacts_df = load_contacts_data()
 
+    col_search, _ = st.columns([2, 1])
+    with col_search:
+        search_query = st.text_input("🔍 Быстрый поиск:", "", placeholder="Введите текст для фильтрации...")
+
     if not contacts_df.empty:
-        search_query = st.text_input("🔍 Поиск по контактам:", "", key="search_contacts")
         if search_query.strip():
             q = search_query.lower()
             mask = contacts_df.apply(lambda row: row.astype(str).str.lower().str.contains(q).any(), axis=1)
@@ -670,11 +684,22 @@ def modal_contacts():
         else:
             filtered_contacts = contacts_df
 
+        # 3. Регулировка размеров колонок: Примечание шире, остальные с автопереносом текста
+        column_configuration = {
+            "Производитель": st.column_config.TextColumn("Производитель", width="medium"),
+            "Оф.сайт": st.column_config.TextColumn("Оф.сайт", width="small"),
+            "Контакт": st.column_config.TextColumn("Контакт", width="small"),
+            "Имя": st.column_config.TextColumn("Имя", width="small"),
+            "Группы товаров": st.column_config.TextColumn("Группы товаров", width="medium"),
+            "Примечание": st.column_config.TextColumn("Примечание", width="large")
+        }
+
         st.dataframe(
             filtered_contacts,
             use_container_width=True,
             hide_index=True,
-            height=320
+            column_config=column_configuration,
+            height=480
         )
     else:
         st.info("Контакты пока не добавлены.")
