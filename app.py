@@ -382,7 +382,7 @@ def parse_new_products_by_batches():
 
 
 def map_excel_columns(uploaded_df):
-  """Разбор столбцов из Excel с фильтрацией пустых строк по первому столбцу."""
+  """Разбор столбцов из Excel с фильтрацией пустых строк по первому столбцу и удалением .0."""
   uploaded_df = uploaded_df.loc[:, ~uploaded_df.columns.duplicated()].copy()
 
   # Загружаем только те строки, у которых заполнен первый столбец
@@ -395,17 +395,28 @@ def map_excel_columns(uploaded_df):
 
   cols = list(uploaded_df.columns)
 
-  def get_column_values(keywords, default_idx=None):
+  def get_column_values(keywords, default_idx=None, clean_code=False):
+    series = None
     for idx, c in enumerate(cols):
       c_str = str(c).strip().lower()
       if any(k in c_str for k in keywords):
-        return uploaded_df.iloc[:, idx].astype(str).values
-    if default_idx is not None and len(cols) > default_idx:
-      return uploaded_df.iloc[:, default_idx].astype(str).values
-    return [""] * len(uploaded_df)
+        series = uploaded_df.iloc[:, idx]
+        break
+    
+    if series is None and default_idx is not None and len(cols) > default_idx:
+      series = uploaded_df.iloc[:, default_idx]
+
+    if series is None:
+      return [""] * len(uploaded_df)
+
+    res = series.astype(str).str.strip()
+    if clean_code:
+      res = res.str.replace(r'\.0$', '', regex=True)
+
+    return res.values
 
   return {
-      'Внешний код': get_column_values(['внешний', 'артикул', 'код товара', 'идентификатор', 'код'], default_idx=0),
+      'Внешний код': get_column_values(['внешний', 'артикул', 'код товара', 'идентификатор', 'код'], default_idx=0, clean_code=True),
       'Группа 3': get_column_values(['группа 3', 'раздел', 'категория', 'группа'], default_idx=None),
       'Наименование': get_column_values(['наименование', 'название', 'номенклатура', 'товар'], default_idx=1),
   }
@@ -431,7 +442,7 @@ def append_new_products_batch(uploaded_files, progress_bar=None, status_text=Non
         status_text.info(f'Чтение файла {idx + 1} из {total_files}: **{u_file.name}**')
 
       u_file.seek(0)
-      raw_df = pd.read_excel(u_file)
+      raw_df = pd.read_excel(u_file, dtype=str)
       mapped_data = map_excel_columns(raw_df)
 
       formatted_df = pd.DataFrame({
@@ -1016,7 +1027,7 @@ with col_upload:
           status_text.info(f'Чтение файла {idx + 1} из {total_files}: **{u_file.name}**')
 
           u_file.seek(0)
-          raw_uploaded_df = pd.read_excel(u_file)
+          raw_uploaded_df = pd.read_excel(u_file, dtype=str)
 
           # Разбор файла с фильтрацией и разбивкой по столбцам A-K
           mapped_data = map_excel_columns(raw_uploaded_df)
