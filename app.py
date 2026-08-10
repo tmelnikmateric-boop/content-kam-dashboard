@@ -131,7 +131,7 @@ CONTACT_COLUMNS = ['Производитель', 'Оф.сайт', 'Контак�
 NEW_PRODUCTS_SHEET_NAME = 'Новые товары'
 MANAGERS_SHEET_NAME = 'Менеджеры'
 
-# Исключен столбец "Выгружено в файл"
+# Основная целевая структура
 NEW_PRODUCTS_COLUMNS = [
     'Внешний код', 'Наименование', 'Дата создания', 
     'Цифровой код менеджера', 'Название раздела', 'Менеджер', 
@@ -278,10 +278,10 @@ def add_contact_row(new_row_dict):
         return False
 
 # ==========================================
-# 1.1 ЛОГИКА ДЛЯ "НОВЫХ ТОВАРОВ" И "МЕНЕДЖЕРОВ"
+# 1.1 ОБНОВЛЕННАЯ УМНАЯ ЛОГИКА ДЛЯ "НОВЫХ ТОВАРОВ" И "МЕНЕДЖЕРОВ"
 # ==========================================
 def load_managers_mapping():
-    """Загружает словарь соответствия цифрового кода менеджеру из листа 'Менеджеры'"""
+    """Улучшенная загрузка таблицы менеджеров с обработкой типов данных"""
     try:
         gc = get_gspread_client()
         sh = gc.open_by_url(SPREADSHEET_URL)
@@ -290,24 +290,29 @@ def load_managers_mapping():
         except gspread.WorksheetNotFound:
             return {}
 
-        records = worksheet.get_all_records()
-        if not records:
+        vals = worksheet.get_all_values()
+        if not vals or len(vals) < 2:
             return {}
 
-        m_df = pd.DataFrame(records).astype(str)
+        m_df = pd.DataFrame(vals[1:], columns=vals[0]).astype(str)
         m_df.columns = m_df.columns.astype(str).str.strip()
 
-        code_col = next((c for c in m_df.columns if 'код' in c.lower()), m_df.columns[0])
+        # Умный поиск колонки кода и колонки имени
+        code_col = next((c for c in m_df.columns if any(k in c.lower() for k in ['код', 'цифровой', 'id'])), m_df.columns[0])
         name_col = next((c for c in m_df.columns if any(k in c.lower() for k in ['менеджер', 'фамили', 'фио', 'имя'])), 
                         m_df.columns[1] if len(m_df.columns) > 1 else m_df.columns[0])
 
-        return dict(zip(m_df[code_col].str.strip(), m_df[name_col].str.strip()))
+        # Приводим коды к строке без дробной части (.0) и лишних пробелов
+        keys = m_df[code_col].str.strip().str.replace(r'\.0$', '', regex=True)
+        values = m_df[name_col].str.strip()
+
+        return dict(zip(keys, values))
     except Exception as e:
         st.error(f"Ошибка загрузки листа менеджеров: {e}")
         return {}
 
 def load_raw_new_products():
-    """Загружает все строки листа 'Новые товары' списком списков"""
+    """Загружает все строки листа 'Новые товары' через get_all_values()"""
     try:
         gc = get_gspread_client()
         sh = gc.open_by_url(SPREADSHEET_URL)
@@ -326,7 +331,6 @@ def load_raw_new_products():
 def parse_new_products_by_batches():
     """
     Разбирает выгрузку из Google Sheets на блоки по датам загрузки.
-    Возвращает словарь { "Дата загрузки": DataFrame_товаров }
     """
     raw_data = load_raw_new_products()
     if not raw_data:
@@ -336,7 +340,7 @@ def parse_new_products_by_batches():
     current_date = "Без даты"
     current_rows = []
 
-    header = raw_data[0] if raw_data else NEW_PRODUCTS_COLUMNS
+    header = NEW_PRODUCTS_COLUMNS
 
     for row in raw_data[1:]:
         if not row or not any(row):
@@ -345,11 +349,8 @@ def parse_new_products_by_batches():
         first_cell = str(row[0]).strip()
         if "📅 Загрузка от" in first_cell:
             if current_rows:
-                df_batch = pd.DataFrame(current_rows, columns=header[:len(current_rows[0])])
-                for col in NEW_PRODUCTS_COLUMNS:
-                    if col not in df_batch.columns:
-                        df_batch[col] = ''
-                batches[current_date] = df_batch[NEW_PRODUCTS_COLUMNS]
+                df_batch = pd.DataFrame(current_rows, columns=header)
+                batches[current_date] = df_batch
                 current_rows = []
             current_date = first_cell.replace("📅 Загрузка от", "").strip()
         else:
@@ -357,17 +358,61 @@ def parse_new_products_by_batches():
             current_rows.append(padded_row[:len(header)])
 
     if current_rows:
-        df_batch = pd.DataFrame(current_rows, columns=header[:len(current_rows[0])])
-        for col in NEW_PRODUCTS_COLUMNS:
-            if col not in df_batch.columns:
-                df_batch[col] = ''
-        batches[current_date] = df_batch[NEW_PRODUCTS_COLUMNS]
+        df_batch = pd.DataFrame(current_rows, columns=header)
+        batches[current_date] = df_batch
 
     return batches
 
+def map_excel_columns(uploaded_df):
+    """
+    Умное сопоставление колонок из загружаемого Excel-файла с целевыми колонками
+    """
+    mapped_df = pd.DataFrame()
+    cols = list(uploaded_df.columns)
+
+    def find_col(keywords):
+        for c in cols:
+            c_str = str(c).strip().lower()
+            if any(k in c_str for k in keywords):
+                return c
+        return None
+
+    # 1. Внешний код
+    col_code = find_col(['внешний', 'артикул', 'код товара', 'идентификатор'])
+    mapped_df['Внешний код'] = uploaded_df[col_code] if col_code else (uploaded_df.iloc[:, 0] if len(cols) > 0 else '')
+
+    # 2. Наименование
+    col_name = find_col(['наименование', 'название', 'номенклатура', 'товар'])
+    mapped_df['Наименование'] = uploaded_df[col_name] if col_name else (uploaded_df.iloc[:, 1] if len(cols) > 1 else '')
+
+    # 3. Дата создания
+    col_date = find_col(['дата созд', 'создан', 'дата'])
+    mapped_df['Дата создания'] = uploaded_df[col_date] if col_date else ''
+
+    # 4. Цифровой код менеджера
+    col_mgr_code = find_col(['цифровой', 'код менеджер', 'код отд', 'код кадра', 'менеджер код'])
+    if col_mgr_code:
+        mapped_df['Цифровой код менеджера'] = uploaded_df[col_mgr_code]
+    else:
+        # Попытка найти чистую числовую колонку если не найдено по названию
+        mapped_df['Цифровой код менеджера'] = ''
+
+    # 5. Название раздела
+    col_sec = find_col(['раздел', 'категория', 'группа'])
+    mapped_df['Название раздела'] = uploaded_df[col_sec] if col_sec else ''
+
+    # 6. Контент
+    col_cnt = find_col(['контент', 'описание', 'статус контент'])
+    mapped_df['Контент'] = uploaded_df[col_cnt] if col_cnt else ''
+
+    # 7. Менеджер (подтянем позже)
+    mapped_df['Менеджер'] = ''
+
+    return mapped_df
+
 def append_new_products(uploaded_df):
     """
-    Добавляет новую партию с автоподстановкой Фамилии менеджера (ВПР)
+    Добавляет новую партию с умным сопоставлением колонок и автоподстановкой Менеджера (ВПР)
     """
     try:
         gc = get_gspread_client()
@@ -378,24 +423,30 @@ def append_new_products(uploaded_df):
             worksheet = sh.add_worksheet(title=NEW_PRODUCTS_SHEET_NAME, rows="1000", cols="10")
             worksheet.append_row(NEW_PRODUCTS_COLUMNS)
 
+        # 1. Приводим загруженные данные к правильной структуре
+        formatted_df = map_excel_columns(uploaded_df)
+
+        # 2. Очищаем типы данных от NaN
+        formatted_df = formatted_df.astype(str).replace({'nan': '', 'NaN': '', 'None': '', '<NA>': '', 'NaT': ''})
+
+        # 3. Нормализуем цифровой код менеджера (убираем .0 при импорте чисел из Excel)
+        formatted_df['Цифровой код менеджера'] = (
+            formatted_df['Цифровой код менеджера']
+            .str.strip()
+            .str.replace(r'\.0$', '', regex=True)
+        )
+
+        # 4. Выполняем автоподстановку менеджера
         managers_map = load_managers_mapping()
+        formatted_df['Менеджер'] = formatted_df['Цифровой код менеджера'].map(managers_map).fillna('')
 
-        uploaded_df = uploaded_df.astype(str).replace({'nan': '', 'NaN': '', 'None': '', '<NA>': '', 'NaT': ''})
-        
-        # Автозаполнение Менеджера по Цифровому коду (аналог ВПР)
-        if 'Цифровой код менеджера' in uploaded_df.columns:
-            uploaded_df['Менеджер'] = uploaded_df['Цифровой код менеджера'].astype(str).str.strip().map(managers_map).fillna('')
-
-        for col in NEW_PRODUCTS_COLUMNS:
-            if col not in uploaded_df.columns:
-                uploaded_df[col] = ''
-
-        uploaded_df = uploaded_df[NEW_PRODUCTS_COLUMNS]
+        # 5. Гарантируем порядок колонок
+        formatted_df = formatted_df[NEW_PRODUCTS_COLUMNS]
 
         now_str = datetime.datetime.now().strftime("%d.%m.%Y %H:%M")
         date_header_row = [f"📅 Загрузка от {now_str}"] + [''] * (len(NEW_PRODUCTS_COLUMNS) - 1)
 
-        rows_to_append = [date_header_row] + uploaded_df.values.tolist()
+        rows_to_append = [date_header_row] + formatted_df.values.tolist()
         worksheet.append_rows(rows_to_append)
 
         return True
