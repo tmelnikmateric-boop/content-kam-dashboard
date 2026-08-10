@@ -109,18 +109,19 @@ SHEET_MAP = {
     },
 }
 
+# Строгая очередность столбцов (A-K)
 COLUMNS = [
-    'ID',
-    'Внешний код',
-    'Группа 3',
-    'Наименование',
-    'Статус',
-    'Исполнитель',
-    'Дата взятия',
-    'Дата выполнения',
-    'Дата завершения работы',
-    'Источник',
-    'Дата загрузки',
+    'ID',                      # A - Номер по-порядку
+    'Внешний код',             # B - Внешний код (из файла)
+    'Группа 3',                # C - Группа 3 (из файла)
+    'Наименование',            # D - Наименование (из файла)
+    'Статус',                  # E - Статус (🆕 Новый)
+    'Исполнитель',             # F - Исполнитель (пустое)
+    'Дата взятия',             # G - Дата взятия (пустое)
+    'Дата выполнения',         # H - Дата выполнения (пустое)
+    'Дата завершения работы',  # I - Дата завершения работы (пустое)
+    'Источник',                # J - Источник (название файла)
+    'Дата загрузки',           # K - Дата загрузки (время загрузки)
 ]
 
 CONTACTS_SHEET_NAME = '📇 Контакты поставщиков'
@@ -147,18 +148,9 @@ NEW_PRODUCTS_COLUMNS = [
 ]
 
 MONTH_NAMES = {
-    1: 'Январь',
-    2: 'Февраль',
-    3: 'Март',
-    4: 'Апрель',
-    5: 'Май',
-    6: 'Июнь',
-    7: 'Июль',
-    8: 'Август',
-    9: 'Сентябрь',
-    10: 'Октябрь',
-    11: 'Ноябрь',
-    12: 'Декабрь',
+    1: 'Январь', 2: 'Февраль', 3: 'Март', 4: 'Апрель',
+    5: 'Май', 6: 'Июнь', 7: 'Июль', 8: 'Август',
+    9: 'Сентябрь', 10: 'Октябрь', 11: 'Ноябрь', 12: 'Декабрь',
 }
 
 
@@ -171,7 +163,7 @@ def get_gspread_client():
 
 
 def load_dept_data(sheet_name):
-  """Загрузка сырых данных напрямую из Google Таблицы."""
+  """Загрузка данных из Google Таблицы с устранением дубликатов колонок."""
   try:
     gc = get_gspread_client()
     sh = gc.open_by_url(SPREADSHEET_URL)
@@ -181,13 +173,13 @@ def load_dept_data(sheet_name):
     if len(vals) > 1:
       headers = [str(h).strip() for h in vals[0]]
       df = pd.DataFrame(vals[1:], columns=headers).astype(str)
-      df = df.replace(
-          {'nan': '', 'NaN': '', 'None': '', '<NA>': '', 'NaT': ''}
-      )
+      # Защита от одинаковых названий столбцов в таблице
+      df = df.loc[:, ~df.columns.duplicated()].copy()
+      df = df.replace({'nan': '', 'NaN': '', 'None': '', '<NA>': '', 'NaT': ''})
       for col in COLUMNS:
         if col not in df.columns:
           df[col] = ''
-      return df
+      return df[COLUMNS]
     return pd.DataFrame(columns=COLUMNS)
   except Exception as e:
     st.error(f'Ошибка загрузки листа {sheet_name}: {e}')
@@ -195,7 +187,7 @@ def load_dept_data(sheet_name):
 
 
 def save_dept_data(dept_info, df):
-  """Сохранение сырых данных и обновление сводного реестра."""
+  """Сохранение данных и автоматическая сквозная нумерация (ID / № п/п)."""
   data_sheet_name = dept_info['data']
   workgroup_sheet_name = dept_info['workgroups']
 
@@ -207,16 +199,13 @@ def save_dept_data(dept_info, df):
       worksheet = sh.worksheet(data_sheet_name)
       existing_vals = worksheet.get_all_values()
     except gspread.WorksheetNotFound:
-      worksheet = sh.add_worksheet(
-          title=data_sheet_name, rows='2000', cols='25'
-      )
+      worksheet = sh.add_worksheet(title=data_sheet_name, rows='2000', cols='25')
       existing_vals = []
 
     if existing_vals and len(existing_vals) > 1:
       old_headers = [str(h).strip() for h in existing_vals[0]]
-      old_data_df = pd.DataFrame(existing_vals[1:], columns=old_headers).astype(
-          str
-      )
+      old_data_df = pd.DataFrame(existing_vals[1:], columns=old_headers).astype(str)
+      old_data_df = old_data_df.loc[:, ~old_data_df.columns.duplicated()].copy()
 
       for col in COLUMNS:
         if col not in old_data_df.columns:
@@ -224,34 +213,30 @@ def save_dept_data(dept_info, df):
         if col not in df.columns:
           df[col] = ''
 
-      # Группируем по полю "Источник"
-      updated_sources = (
-          df['Источник']
-          .replace('', np.nan)
-          .fillna(df.get('Имя файла', ''))
-          .unique()
-      )
+      updated_sources = df['Источник'].replace('', np.nan).dropna().unique()
       old_sources = old_data_df['Источник'].replace('', np.nan).fillna('')
 
       old_filtered = old_data_df[~old_sources.isin(updated_sources)]
-      full_df = pd.concat([old_filtered, df[COLUMNS]], ignore_index=True)
+      full_df = pd.concat([old_filtered[COLUMNS], df[COLUMNS]], ignore_index=True)
     else:
-      full_df = df[COLUMNS]
+      full_df = df[COLUMNS].copy()
 
     full_df = full_df.fillna('').astype(str)
+    
+    # Заполнение столбца A (ID / Номер по порядку) сквозной нумерацией 1..N
+    full_df['ID'] = [str(i + 1) for i in range(len(full_df))]
+
     data_to_write = [COLUMNS] + full_df.values.tolist()
 
     worksheet.clear()
     worksheet.update(range_name='A1', values=data_to_write)
 
-    # Перерасчет и обновление сводной таблицы групп
+    # Обновление сводной таблицы групп
     try:
       try:
         wg_worksheet = sh.worksheet(workgroup_sheet_name)
       except gspread.WorksheetNotFound:
-        wg_worksheet = sh.add_worksheet(
-            title=workgroup_sheet_name, rows='1000', cols='20'
-        )
+        wg_worksheet = sh.add_worksheet(title=workgroup_sheet_name, rows='1000', cols='20')
 
       full_summary_df = build_summary(full_df)
 
@@ -263,10 +248,7 @@ def save_dept_data(dept_info, df):
         wg_worksheet.update(range_name='A1', values=wg_data)
 
     except Exception as wg_err:
-      st.warning(
-          f"Основные данные сохранены, но не удалось обновить лист"
-          f" '{workgroup_sheet_name}': {wg_err}"
-      )
+      st.warning(f"Основные данные сохранены, но не обновлен лист '{workgroup_sheet_name}': {wg_err}")
 
     return True
   except Exception as e:
@@ -281,9 +263,7 @@ def load_contacts_data():
     try:
       worksheet = sh.worksheet(CONTACTS_SHEET_NAME)
     except gspread.WorksheetNotFound:
-      worksheet = sh.add_worksheet(
-          title=CONTACTS_SHEET_NAME, rows='1000', cols='10'
-      )
+      worksheet = sh.add_worksheet(title=CONTACTS_SHEET_NAME, rows='1000', cols='10')
       worksheet.append_row(CONTACT_COLUMNS)
       return pd.DataFrame(columns=CONTACT_COLUMNS)
 
@@ -308,14 +288,10 @@ def add_contact_row(new_row_dict):
     try:
       worksheet = sh.worksheet(CONTACTS_SHEET_NAME)
     except gspread.WorksheetNotFound:
-      worksheet = sh.add_worksheet(
-          title=CONTACTS_SHEET_NAME, rows='1000', cols='10'
-      )
+      worksheet = sh.add_worksheet(title=CONTACTS_SHEET_NAME, rows='1000', cols='10')
       worksheet.append_row(CONTACT_COLUMNS)
 
-    row_values = [
-        str(new_row_dict.get(col, '')).strip() for col in CONTACT_COLUMNS
-    ]
+    row_values = [str(new_row_dict.get(col, '')).strip() for col in CONTACT_COLUMNS]
     worksheet.append_row(row_values)
     return True
   except Exception as e:
@@ -340,19 +316,11 @@ def load_managers_mapping():
     m_df.columns = m_df.columns.astype(str).str.strip()
 
     code_col = next(
-        (
-            c
-            for c in m_df.columns
-            if any(k in c.lower() for k in ['код', 'цифровой', 'id'])
-        ),
+        (c for c in m_df.columns if any(k in c.lower() for k in ['код', 'цифровой', 'id'])),
         m_df.columns[0],
     )
     name_col = next(
-        (
-            c
-            for c in m_df.columns
-            if any(k in c.lower() for k in ['менеджер', 'фамили', 'фио', 'имя'])
-        ),
+        (c for c in m_df.columns if any(k in c.lower() for k in ['менеджер', 'фамили', 'фио', 'имя'])),
         m_df.columns[1] if len(m_df.columns) > 1 else m_df.columns[0],
     )
 
@@ -372,9 +340,7 @@ def load_raw_new_products():
     try:
       worksheet = sh.worksheet(NEW_PRODUCTS_SHEET_NAME)
     except gspread.WorksheetNotFound:
-      worksheet = sh.add_worksheet(
-          title=NEW_PRODUCTS_SHEET_NAME, rows='1000', cols='10'
-      )
+      worksheet = sh.add_worksheet(title=NEW_PRODUCTS_SHEET_NAME, rows='1000', cols='10')
       worksheet.append_row(NEW_PRODUCTS_COLUMNS)
       return []
 
@@ -417,63 +383,34 @@ def parse_new_products_by_batches():
 
 
 def map_excel_columns(uploaded_df):
-  mapped_df = pd.DataFrame()
+  """Безопасный разбор столбцов из Excel файла во избежание дублирования колонок."""
+  uploaded_df = uploaded_df.loc[:, ~uploaded_df.columns.duplicated()].copy()
   cols = list(uploaded_df.columns)
 
-  def find_col(keywords):
-    for c in cols:
+  def get_column_values(keywords, default_idx=None):
+    for idx, c in enumerate(cols):
       c_str = str(c).strip().lower()
       if any(k in c_str for k in keywords):
-        return c
-    return None
+        return uploaded_df.iloc[:, idx].astype(str).values
+    if default_idx is not None and len(cols) > default_idx:
+      return uploaded_df.iloc[:, default_idx].astype(str).values
+    return [""] * len(uploaded_df)
 
-  col_code = find_col(['внешний', 'артикул', 'код товара', 'идентификатор'])
-  mapped_df['Внешний код'] = (
-      uploaded_df[col_code]
-      if col_code
-      else (uploaded_df.iloc[:, 0] if len(cols) > 0 else '')
-  )
-
-  col_name = find_col(['наименование', 'название', 'номенклатура', 'товар'])
-  mapped_df['Наименование'] = (
-      uploaded_df[col_name]
-      if col_name
-      else (uploaded_df.iloc[:, 1] if len(cols) > 1 else '')
-  )
-
-  col_sec = find_col(['группа 3', 'раздел', 'категория', 'группа'])
-  mapped_df['Группа 3'] = uploaded_df[col_sec] if col_sec else ''
-
-  col_date = find_col(['дата созд', 'создан', 'дата'])
-  mapped_df['Дата создания'] = uploaded_df[col_date] if col_date else ''
-
-  col_mgr_code = find_col(
-      ['цифровой', 'код менеджер', 'код отд', 'код кадра', 'менеджер код']
-  )
-  mapped_df['Цифровой код менеджера'] = (
-      uploaded_df[col_mgr_code] if col_mgr_code else ''
-  )
-
-  col_cnt = find_col(['контент', 'описание', 'статус контент'])
-  mapped_df['Контент'] = uploaded_df[col_cnt] if col_cnt else ''
-  mapped_df['Менеджер'] = ''
-
-  return mapped_df
+  return {
+      'Внешний код': get_column_values(['внешний', 'артикул', 'код товара', 'идентификатор', 'код'], default_idx=0),
+      'Группа 3': get_column_values(['группа 3', 'раздел', 'категория', 'группа'], default_idx=None),
+      'Наименование': get_column_values(['наименование', 'название', 'номенклатура', 'товар'], default_idx=1),
+  }
 
 
-def append_new_products_batch(
-    uploaded_files, progress_bar=None, status_text=None
-):
-  """Добавление нескольких файлов в лист 'Новые товары' с градусником загрузки."""
+def append_new_products_batch(uploaded_files, progress_bar=None, status_text=None):
   try:
     gc = get_gspread_client()
     sh = gc.open_by_url(SPREADSHEET_URL)
     try:
       worksheet = sh.worksheet(NEW_PRODUCTS_SHEET_NAME)
     except gspread.WorksheetNotFound:
-      worksheet = sh.add_worksheet(
-          title=NEW_PRODUCTS_SHEET_NAME, rows='1000', cols='10'
-      )
+      worksheet = sh.add_worksheet(title=NEW_PRODUCTS_SHEET_NAME, rows='1000', cols='10')
       worksheet.append_row(NEW_PRODUCTS_COLUMNS)
 
     managers_map = load_managers_mapping()
@@ -484,30 +421,26 @@ def append_new_products_batch(
 
     for idx, u_file in enumerate(uploaded_files):
       if status_text:
-        status_text.info(
-            f'Чтение файла {idx + 1} из {total_files}: **{u_file.name}**'
-        )
+        status_text.info(f'Чтение файла {idx + 1} из {total_files}: **{u_file.name}**')
 
-      u_file.seek(0)  # Сброс указателя потока файла
+      u_file.seek(0)
       raw_df = pd.read_excel(u_file)
-      formatted_df = map_excel_columns(raw_df)
-      formatted_df = formatted_df.astype(str).replace(
-          {'nan': '', 'NaN': '', 'None': '', '<NA>': '', 'NaT': ''}
-      )
-      formatted_df['Цифровой код менеджера'] = (
-          formatted_df['Цифровой код менеджера']
-          .str.strip()
-          .str.replace(r'\.0$', '', regex=True)
-      )
+      mapped_data = map_excel_columns(raw_df)
 
-      formatted_df['Менеджер'] = (
-          formatted_df['Цифровой код менеджера'].map(managers_map).fillna('')
-      )
+      formatted_df = pd.DataFrame({
+          'Внешний код': mapped_data['Внешний код'],
+          'Наименование': mapped_data['Наименование'],
+          'Дата создания': '',
+          'Цифровой код менеджера': '',
+          'Название раздела': mapped_data['Группа 3'],
+          'Менеджер': '',
+          'Контент': '',
+      })
+
+      formatted_df = formatted_df.astype(str).replace({'nan': '', 'NaN': '', 'None': '', '<NA>': '', 'NaT': ''})
       formatted_df = formatted_df[NEW_PRODUCTS_COLUMNS]
 
-      date_header_row = [f'📅 Загрузка от {now_str} ({u_file.name})'] + [''] * (
-          len(NEW_PRODUCTS_COLUMNS) - 1
-      )
+      date_header_row = [f'📅 Загрузка от {now_str} ({u_file.name})'] + [''] * (len(NEW_PRODUCTS_COLUMNS) - 1)
       all_rows_to_append.append(date_header_row)
       all_rows_to_append.extend(formatted_df.values.tolist())
 
@@ -545,7 +478,6 @@ def calculate_business_days(date_str):
 
 
 def build_summary(df):
-  """Построение группы на базе колонки 'Источник' и даты 'Дата загрузки'."""
   if df.empty:
     return pd.DataFrame()
 
@@ -553,8 +485,6 @@ def build_summary(df):
 
   if 'Источник' in temp_df.columns:
     source_series = temp_df['Источник'].astype(str).str.strip()
-  elif 'Имя файла' in temp_df.columns:
-    source_series = temp_df['Имя файла'].astype(str).str.strip()
   else:
     source_series = pd.Series('Без названия', index=temp_df.index)
 
@@ -578,52 +508,16 @@ def build_summary(df):
       return ''
 
     st_val = str(first_row.get('Статус', '')).strip().lower()
-    st_grp = str(first_row.get('Статус группы', '')).strip().lower()
 
     date_done = get_clean_val(['Дата завершения работы', 'Дата выполнения'])
-    date_take = get_clean_val(['Дата взятия', 'Дата начала работы'])
+    date_take = get_clean_val(['Дата взятия'])
     pause_reason = get_clean_val(['Причина паузы', 'Причина'])
     date_pause = get_clean_val(['Дата паузы'])
-    date_added = get_clean_val(
-        ['Дата загрузки', 'Дата добавления файла', 'Дата добавления']
-    )
+    date_added = get_clean_val(['Дата загрузки'])
 
-    is_completed = (
-        st_val
-        in [
-            'выполнено',
-            'выполнен',
-            'завершен',
-            'завершена',
-            '✅ выполнен',
-            '✅ завершена',
-        ]
-        or 'выполнен' in st_grp
-        or 'выполнено' in st_grp
-        or bool(date_done)
-    )
-
-    is_paused = (
-        st_val in ['пауза', 'на паузе', '⏸️ на паузе']
-        or 'пауз' in st_grp
-        or '⏸' in st_val
-    )
-
-    is_in_work = (
-        not is_completed
-        and not is_paused
-        and (
-            st_val
-            in [
-                'в работе',
-                'взято в работу',
-                'взята в работу',
-                '🔄 в работе',
-            ]
-            or 'в работе' in st_grp
-            or bool(date_take)
-        )
-    )
+    is_completed = st_val in ['выполнено', 'выполнен', 'завершен', '✅ выполнен', '✅ завершена'] or bool(date_done)
+    is_paused = st_val in ['пауза', 'на паузе', '⏸️ на паузе'] or '⏸' in st_val
+    is_in_work = not is_completed and not is_paused and (st_val in ['в работе', 'взято в работу', '🔄 в работе'] or bool(date_take))
 
     if is_completed:
       done_cnt, in_work_cnt, new_cnt, group_status = total, 0, 0, '✅ Выполнен'
@@ -679,10 +573,7 @@ def render_grouped_html_table(df, group_col, cols_order, headers):
     for _, row in sub_df.iterrows():
       html += '<tr>'
       if first_row:
-        html += (
-            f"<td rowspan='{rowspan}'"
-            f" class='grouped-cell'>{row[group_col]}</td>"
-        )
+        html += f"<td rowspan='{rowspan}' class='grouped-cell'>{row[group_col]}</td>"
         first_row = False
 
       for col in cols_order:
@@ -697,7 +588,6 @@ def render_grouped_html_table(df, group_col, cols_order, headers):
 # ==========================================
 # 3. МОДАЛЬНЫЕ ОКНА (DIALOGS)
 # ==========================================
-
 
 @st.dialog('▶️ Взять файлы в работу')
 def modal_take_in_work(dept_info, summary_df, df):
@@ -726,8 +616,6 @@ def modal_take_in_work(dept_info, summary_df, df):
     else:
       now_str = datetime.datetime.now().strftime('%d.%m.%Y %H:%M:%S')
       mask = df['Источник'].isin(selected_files)
-      if 'Имя файла' in df.columns:
-        mask = mask | df['Имя файла'].isin(selected_files)
 
       df.loc[mask, 'Статус'] = 'В работе'
       df.loc[mask, 'Исполнитель'] = executor_name.strip()
@@ -766,8 +654,6 @@ def modal_pause(dept_info, summary_df, df):
     else:
       now_str = datetime.datetime.now().strftime('%d.%m.%Y %H:%M:%S')
       mask = df['Источник'].isin(selected_files)
-      if 'Имя файла' in df.columns:
-        mask = mask | df['Имя файла'].isin(selected_files)
 
       df.loc[mask, 'Статус'] = 'Пауза'
       if 'Причина паузы' in df.columns:
@@ -794,9 +680,7 @@ def modal_unpause(dept_info, summary_df, df):
     for _, row in paused_df.iterrows():
       filename = row['Имя файла']
       count = row['Количество товаров']
-      if st.checkbox(
-          f'{filename} — {count} SKU', key=f'chk_unpause_{filename}'
-      ):
+      if st.checkbox(f'{filename} — {count} SKU', key=f'chk_unpause_{filename}'):
         selected_files.append(filename)
 
   if st.button('Вернуть в работу'):
@@ -804,8 +688,6 @@ def modal_unpause(dept_info, summary_df, df):
       st.warning('Отметьте хотя бы один файл!')
     else:
       mask = df['Источник'].isin(selected_files)
-      if 'Имя файла' in df.columns:
-        mask = mask | df['Имя файла'].isin(selected_files)
 
       df.loc[mask, 'Статус'] = 'В работе'
       if 'Причина паузы' in df.columns:
@@ -841,8 +723,6 @@ def modal_complete(dept_info, summary_df, df):
     else:
       now_str = datetime.datetime.now().strftime('%d.%m.%Y %H:%M:%S')
       mask = df['Источник'].isin(selected_files)
-      if 'Имя файла' in df.columns:
-        mask = mask | df['Имя файла'].isin(selected_files)
 
       df.loc[mask, 'Статус'] = 'Выполнено'
       df.loc[mask, 'Дата завершения работы'] = now_str
@@ -864,25 +744,15 @@ def modal_analytics():
 
   with st.container(height=650):
     new_content_sku = (
-        summary_content[summary_content['Статус группы'] == '🆕 Новый'][
-            'Количество товаров'
-        ].sum()
-        if not summary_content.empty
-        else 0
+        summary_content[summary_content['Статус группы'] == '🆕 Новый']['Количество товаров'].sum()
+        if not summary_content.empty else 0
     )
     new_comm_sku = (
-        summary_comm[summary_comm['Статус группы'] == '🆕 Новый'][
-            'Количество товаров'
-        ].sum()
-        if not summary_comm.empty
-        else 0
+        summary_comm[summary_comm['Статус группы'] == '🆕 Новый']['Количество товаров'].sum()
+        if not summary_comm.empty else 0
     )
 
-    st.markdown(
-        "<h4 style='font-weight: 500; font-size: 1.05rem; margin-bottom:"
-        " 12px;'>🆕 Новые SKU на добавление</h4>",
-        unsafe_allow_html=True,
-    )
+    st.markdown("<h4 style='font-weight: 500; font-size: 1.05rem; margin-bottom: 12px;'>🆕 Новые SKU на добавление</h4>", unsafe_allow_html=True)
     col_m1, col_m2 = st.columns(2)
     col_m1.metric('Отдел контента', f'{new_content_sku} SKU')
     col_m2.metric('Коммерческий отдел', f'{new_comm_sku} SKU')
@@ -900,16 +770,10 @@ def modal_analytics():
     if combined_summaries:
       all_summary = pd.concat(combined_summaries, ignore_index=True)
 
-      st.markdown(
-          "<h4 style='font-weight: 500; font-size: 1.05rem; margin-bottom:"
-          " 12px;'>👤 Статистика по месяцам</h4>",
-          unsafe_allow_html=True,
-      )
+      st.markdown("<h4 style='font-weight: 500; font-size: 1.05rem; margin-bottom: 12px;'>👤 Статистика по месяцам</h4>", unsafe_allow_html=True)
 
       def parse_date_and_month(row):
-        date_str = str(row['Дата завершения работы']) or str(
-            row['Дата начала работы']
-        )
+        date_str = str(row['Дата завершения работы']) or str(row['Дата начала работы'])
         if date_str and len(date_str) >= 10:
           try:
             clean_date = date_str.split(' ')[0]
@@ -921,23 +785,16 @@ def modal_analytics():
             return pd.Series(['Неизвестно', '9999-99'])
         return pd.Series(['Неизвестно', '9999-99'])
 
-      all_summary[['Месяц', 'Месяц_сорт']] = all_summary.apply(
-          parse_date_and_month, axis=1
-      )
+      all_summary[['Месяц', 'Месяц_сорт']] = all_summary.apply(parse_date_and_month, axis=1)
       exec_df = all_summary[all_summary['Исполнитель'].str.strip() != ''].copy()
 
       if not exec_df.empty:
         perf_df = (
-            exec_df.groupby(['Месяц_сорт', 'Месяц', 'Исполнитель'])[
-                'Количество товаров'
-            ]
-            .sum()
-            .reset_index()
+            exec_df.groupby(['Месяц_сорт', 'Месяц', 'Исполнитель'])['Количество товаров']
+            .sum().reset_index()
         )
         perf_df.sort_values(by=['Месяц_сорт', 'Исполнитель'], inplace=True)
-        perf_df.rename(
-            columns={'Количество товаров': 'Количество SKU'}, inplace=True
-        )
+        perf_df.rename(columns={'Количество товаров': 'Количество SKU'}, inplace=True)
 
         html_table_perf = render_grouped_html_table(
             df=perf_df,
@@ -951,27 +808,16 @@ def modal_analytics():
 
       st.divider()
 
-      st.markdown(
-          "<h4 style='font-weight: 500; font-size: 1.05rem; margin-bottom:"
-          " 12px;'>🔄 В работе на данный момент</h4>",
-          unsafe_allow_html=True,
-      )
-      in_work_summary = all_summary[
-          all_summary['Статус группы'] == '🔄 В работе'
-      ].copy()
+      st.markdown("<h4 style='font-weight: 500; font-size: 1.05rem; margin-bottom: 12px;'>🔄 В работе на данный момент</h4>", unsafe_allow_html=True)
+      in_work_summary = all_summary[all_summary['Статус группы'] == '🔄 В работе'].copy()
 
       if not in_work_summary.empty:
         work_by_exec = (
-            in_work_summary.groupby(['Исполнитель', 'Отдел'])[
-                'Количество товаров'
-            ]
-            .sum()
-            .reset_index()
+            in_work_summary.groupby(['Исполнитель', 'Отдел'])['Количество товаров']
+            .sum().reset_index()
         )
         work_by_exec.sort_values(by=['Исполнитель', 'Отдел'], inplace=True)
-        work_by_exec.rename(
-            columns={'Количество товаров': 'SKU в работе'}, inplace=True
-        )
+        work_by_exec.rename(columns={'Количество товаров': 'SKU в работе'}, inplace=True)
 
         html_table_work = render_grouped_html_table(
             df=work_by_exec,
@@ -990,9 +836,7 @@ def modal_analytics():
 def modal_contacts():
   with st.expander('➕ Добавить новый контакт поставщика', expanded=False):
     with st.form('add_contact_form', clear_on_submit=True):
-      f_col1, f_col2, f_col3, f_col4, f_col5, f_col6 = st.columns(
-          [1.2, 1.2, 1.2, 1.2, 1.5, 2.0]
-      )
+      f_col1, f_col2, f_col3, f_col4, f_col5, f_col6 = st.columns([1.2, 1.2, 1.2, 1.2, 1.5, 2.0])
       with f_col1:
         producer = st.text_input('Производитель', placeholder='Название')
       with f_col2:
@@ -1006,9 +850,7 @@ def modal_contacts():
       with f_col6:
         note = st.text_input('Примечание', placeholder='Доп. информация')
 
-      btn_submit = st.form_submit_button(
-          'Сохранить контакт', use_container_width=True
-      )
+      btn_submit = st.form_submit_button('Сохранить контакт', use_container_width=True)
 
       if btn_submit:
         if not producer.strip() and not name.strip():
@@ -1030,31 +872,22 @@ def modal_contacts():
 
   col_search, _ = st.columns([2, 1])
   with col_search:
-    search_query = st.text_input(
-        '🔍 Быстрый поиск:', '', placeholder='Введите текст для фильтрации...'
-    )
+    search_query = st.text_input('🔍 Быстрый поиск:', '', placeholder='Введите текст для фильтрации...')
 
   if not contacts_df.empty:
     if search_query.strip():
       q = search_query.lower()
-      mask = contacts_df.apply(
-          lambda row: row.astype(str).str.lower().str.contains(q).any(),
-          axis=1,
-      )
+      mask = contacts_df.apply(lambda row: row.astype(str).str.lower().str.contains(q).any(), axis=1)
       filtered_contacts = contacts_df[mask]
     else:
       filtered_contacts = contacts_df
 
     column_configuration = {
-        'Производитель': st.column_config.TextColumn(
-            'Производитель', width='medium'
-        ),
+        'Производитель': st.column_config.TextColumn('Производитель', width='medium'),
         'Оф.сайт': st.column_config.TextColumn('Оф.сайт', width='small'),
         'Контакт': st.column_config.TextColumn('Контакт', width='small'),
         'Имя': st.column_config.TextColumn('Имя', width='small'),
-        'Группы товаров': st.column_config.TextColumn(
-            'Группы товаров', width='medium'
-        ),
+        'Группы товаров': st.column_config.TextColumn('Группы товаров', width='medium'),
         'Примечание': st.column_config.TextColumn('Примечание', width='large'),
     }
 
@@ -1071,11 +904,7 @@ def modal_contacts():
 
 @st.dialog('📦 Новые товары (Еженедельная загрузка)')
 def modal_new_products():
-  st.markdown(
-      "<h4 style='font-weight: 500; font-size: 1.05rem; margin-top: 5px;"
-      " margin-bottom: 12px;'>📥 Загрузить файлы (пакетно)</h4>",
-      unsafe_allow_html=True,
-  )
+  st.markdown("<h4 style='font-weight: 500; font-size: 1.05rem; margin-top: 5px; margin-bottom: 12px;'>📥 Загрузить файлы (пакетно)</h4>", unsafe_allow_html=True)
 
   uploaded_files = st.file_uploader(
       'Выберите .xlsx / .xls файлы',
@@ -1085,19 +914,12 @@ def modal_new_products():
   )
 
   if uploaded_files:
-    if st.button(
-        f'🚀 Добавить выгрузки в таблицу ({len(uploaded_files)})',
-        use_container_width=True,
-    ):
+    if st.button(f'🚀 Добавить выгрузки в таблицу ({len(uploaded_files)})', use_container_width=True):
       progress_bar = st.progress(0)
       status_text = st.empty()
       try:
-        if append_new_products_batch(
-            uploaded_files, progress_bar, status_text
-        ):
-          status_text.success(
-              f'Успешно добавлено файлов: {len(uploaded_files)}!'
-          )
+        if append_new_products_batch(uploaded_files, progress_bar, status_text):
+          status_text.success(f'Успешно добавлено файлов: {len(uploaded_files)}!')
           st.rerun()
       except Exception as e:
         status_text.empty()
@@ -1106,11 +928,7 @@ def modal_new_products():
 
   st.divider()
 
-  st.markdown(
-      "<h4 style='font-weight: 500; font-size: 1.05rem; margin-bottom:"
-      " 12px;'>📋 Реестр выгрузок по датам</h4>",
-      unsafe_allow_html=True,
-  )
+  st.markdown("<h4 style='font-weight: 500; font-size: 1.05rem; margin-bottom: 12px;'>📋 Реестр выгрузок по датам</h4>", unsafe_allow_html=True)
 
   batches = parse_new_products_by_batches()
 
@@ -1118,35 +936,17 @@ def modal_new_products():
     dates_list = list(batches.keys())
     dates_list.reverse()
 
-    selected_date = st.selectbox(
-        '📅 Выберите дату загрузки:',
-        options=dates_list,
-        key='select_batch_date',
-    )
-
+    selected_date = st.selectbox('📅 Выберите дату загрузки:', options=dates_list, key='select_batch_date')
     selected_df = batches[selected_date]
 
-    st.caption(
-        f'Всего товаров в выгрузке: **{len(selected_df)}** | Кликните по'
-        ' заголовку любого столбца для сортировки'
-    )
+    st.caption(f'Всего товаров в выгрузке: **{len(selected_df)}** | Кликните по заголовку любого столбца для сортировки')
 
     np_column_config = {
-        'Внешний код': st.column_config.TextColumn(
-            'Внешний код', width='small'
-        ),
-        'Наименование': st.column_config.TextColumn(
-            'Наименование', width='large'
-        ),
-        'Дата создания': st.column_config.TextColumn(
-            'Дата создания', width='small'
-        ),
-        'Цифровой код менеджера': st.column_config.TextColumn(
-            'Код менеджера', width='small'
-        ),
-        'Название раздела': st.column_config.TextColumn(
-            'Название раздела', width='medium'
-        ),
+        'Внешний код': st.column_config.TextColumn('Внешний код', width='small'),
+        'Наименование': st.column_config.TextColumn('Наименование', width='large'),
+        'Дата создания': st.column_config.TextColumn('Дата создания', width='small'),
+        'Цифровой код менеджера': st.column_config.TextColumn('Код менеджера', width='small'),
+        'Название раздела': st.column_config.TextColumn('Название раздела', width='medium'),
         'Менеджер': st.column_config.TextColumn('Менеджер', width='medium'),
         'Контент': st.column_config.TextColumn('Контент', width='small'),
     }
@@ -1166,10 +966,7 @@ def modal_new_products():
 # 4. ОСНОВНОЙ ИНТЕРФЕЙС STREAMLIT
 # ==========================================
 
-st.markdown(
-    "<h2 class='custom-header'>Панель управления отдела контента</h2>",
-    unsafe_allow_html=True,
-)
+st.markdown("<h2 class='custom-header'>Панель управления отдела контента</h2>", unsafe_allow_html=True)
 
 dept = st.radio(
     'Выберите отдел:',
@@ -1198,36 +995,38 @@ with col_upload:
       accept_multiple_files=True,
   )
   if uploaded_files:
-    if st.button(
-        f'Загрузить файлы ({len(uploaded_files)})', use_container_width=True
-    ):
+    if st.button(f'Загрузить файлы ({len(uploaded_files)})', use_container_width=True):
       now_str = datetime.datetime.now().strftime('%d.%m.%Y %H:%M:%S')
       all_dfs = []
       total_files = len(uploaded_files)
 
-      # Индикация процесса (градусник)
       progress_bar = st.progress(0)
       status_text = st.empty()
 
       try:
         for idx, u_file in enumerate(uploaded_files):
-          status_text.info(
-              f'Чтение файла {idx + 1} из {total_files}: **{u_file.name}**'
-          )
+          status_text.info(f'Чтение файла {idx + 1} из {total_files}: **{u_file.name}**')
 
-          # Сбрасываем указатель файла перед считыванием, чтобы не было ошибок пустых буферов
           u_file.seek(0)
           raw_uploaded_df = pd.read_excel(u_file)
 
-          # Формируем структуру с использованием Источник и Дата загрузки
-          uploaded_df = map_excel_columns(raw_uploaded_df)
-          uploaded_df['Источник'] = u_file.name
-          uploaded_df['Дата загрузки'] = now_str
-          uploaded_df['Статус'] = 'Новый'
+          # Разбор файла с четким распределением по столбцам A-K
+          mapped_data = map_excel_columns(raw_uploaded_df)
+          num_rows = len(mapped_data['Внешний код'])
 
-          for col in COLUMNS:
-            if col not in uploaded_df.columns:
-              uploaded_df[col] = ''
+          uploaded_df = pd.DataFrame({
+              'ID': [''] * num_rows,                       # A - Заполняется автоматической нумерацией
+              'Внешний код': mapped_data['Внешний код'],   # B - Из файла
+              'Группа 3': mapped_data['Группа 3'],         # C - Из файла
+              'Наименование': mapped_data['Наименование'], # D - Из файла
+              'Статус': ['🆕 Новый'] * num_rows,            # E - Статус по умолчанию
+              'Исполнитель': [''] * num_rows,              # F - Пустое
+              'Дата взятия': [''] * num_rows,              # G - Пустое
+              'Дата выполнения': [''] * num_rows,          # H - Пустое
+              'Дата завершения работы': [''] * num_rows,   # I - Пустое
+              'Источник': [u_file.name] * num_rows,        # J - Имя файла
+              'Дата загрузки': [now_str] * num_rows,       # K - Время загрузки
+          })
 
           all_dfs.append(uploaded_df[COLUMNS])
           progress_bar.progress(int(((idx + 1) / total_files) * 60))
@@ -1290,26 +1089,10 @@ if summary_df.empty:
 else:
   st.subheader(f'📋 Реестр групп — {dept.upper()}')
 
-  new_df = (
-      summary_df[summary_df['Статус группы'] == '🆕 Новый']
-      .copy()
-      .reset_index(drop=True)
-  )
-  paused_df = (
-      summary_df[summary_df['Статус группы'] == '⏸️ На паузе']
-      .copy()
-      .reset_index(drop=True)
-  )
-  work_df = (
-      summary_df[summary_df['Статус группы'] == '🔄 В работе']
-      .copy()
-      .reset_index(drop=True)
-  )
-  completed_summary = (
-      summary_df[summary_df['Статус группы'] == '✅ Выполнен']
-      .copy()
-      .reset_index(drop=True)
-  )
+  new_df = summary_df[summary_df['Статус группы'] == '🆕 Новый'].copy().reset_index(drop=True)
+  paused_df = summary_df[summary_df['Статус группы'] == '⏸️ На паузе'].copy().reset_index(drop=True)
+  work_df = summary_df[summary_df['Статус группы'] == '🔄 В работе'].copy().reset_index(drop=True)
+  completed_summary = summary_df[summary_df['Статус группы'] == '✅ Выполнен'].copy().reset_index(drop=True)
 
   tab_new, tab_paused, tab_work = st.tabs([
       f'🆕 Новые ({len(new_df)})',
@@ -1321,59 +1104,22 @@ else:
     if new_df.empty:
       st.info('Нет новых групп.')
     else:
-      cols_new = [
-          c
-          for c in [
-              'Имя файла',
-              'Группа 3',
-              'Количество товаров',
-              'Дата добавления',
-              'Дней с добавления',
-          ]
-          if c in new_df.columns
-      ]
-      st.dataframe(
-          new_df[cols_new], use_container_width=True, hide_index=True
-      )
+      cols_new = [c for c in ['Имя файла', 'Группа 3', 'Количество товаров', 'Дата добавления', 'Дней с добавления'] if c in new_df.columns]
+      st.dataframe(new_df[cols_new], use_container_width=True, hide_index=True)
 
   with tab_paused:
     if paused_df.empty:
       st.info('Нет групп на паузе.')
     else:
-      cols_paused = [
-          c
-          for c in [
-              'Имя файла',
-              'Группа 3',
-              'Количество товаров',
-              'Исполнитель',
-              'Дата паузы',
-              'Причина паузы',
-          ]
-          if c in paused_df.columns
-      ]
-      st.dataframe(
-          paused_df[cols_paused], use_container_width=True, hide_index=True
-      )
+      cols_paused = [c for c in ['Имя файла', 'Группа 3', 'Количество товаров', 'Исполнитель', 'Дата паузы', 'Причина паузы'] if c in paused_df.columns]
+      st.dataframe(paused_df[cols_paused], use_container_width=True, hide_index=True)
 
   with tab_work:
     if work_df.empty:
       st.info('Нет групп в работе.')
     else:
-      cols_work = [
-          c
-          for c in [
-              'Имя файла',
-              'Группа 3',
-              'Количество товаров',
-              'Исполнитель',
-              'Дата начала работы',
-          ]
-          if c in work_df.columns
-      ]
-      st.dataframe(
-          work_df[cols_work], use_container_width=True, hide_index=True
-      )
+      cols_work = [c for c in ['Имя файла', 'Группа 3', 'Количество товаров', 'Исполнитель', 'Дата начала работы'] if c in work_df.columns]
+      st.dataframe(work_df[cols_work], use_container_width=True, hide_index=True)
 
   st.write('')
 
@@ -1396,20 +1142,5 @@ else:
     if completed_summary.empty:
       st.info('Завершенных групп пока нет.')
     else:
-      cols_completed = [
-          c
-          for c in [
-              'Имя файла',
-              'Группа 3',
-              'Количество товаров',
-              'Исполнитель',
-              'Дата начала работы',
-              'Дата завершения работы',
-          ]
-          if c in completed_summary.columns
-      ]
-      st.dataframe(
-          completed_summary[cols_completed],
-          use_container_width=True,
-          hide_index=True,
-      )
+      cols_completed = [c for c in ['Имя файла', 'Группа 3', 'Количество товаров', 'Исполнитель', 'Дата начала работы', 'Дата завершения работы'] if c in completed_summary.columns]
+      st.dataframe(completed_summary[cols_completed], use_container_width=True, hide_index=True)
