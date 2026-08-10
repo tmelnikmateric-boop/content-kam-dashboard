@@ -9,7 +9,7 @@ import streamlit as st
 # 0. НАСТРОЙКА СТРАНИЦЫ И СТИЛЕЙ
 # ==========================================
 st.set_page_config(
-    page_title="Панель управления отдела контента", layout="wide"
+    page_title="Панель управления отдела контента!!!", layout="wide"
 )
 
 st.markdown(
