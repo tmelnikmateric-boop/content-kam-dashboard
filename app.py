@@ -167,7 +167,7 @@ def load_dept_data(sheet_name):
         return pd.DataFrame(columns=COLUMNS)
 
 def save_dept_data(dept_info, df):
-    """Надежное сохранение полного датафрейма с выравниванием колонок"""
+    """Сохранение сырых данных и бережное обновление сводной таблицы рабочих групп без потери истории."""
     data_sheet_name = dept_info['data']
     workgroup_sheet_name = dept_info['workgroups']
 
@@ -175,12 +175,12 @@ def save_dept_data(dept_info, df):
         gc = get_gspread_client()
         sh = gc.open_by_url(SPREADSHEET_URL)
 
+        # 1. Сохранение основных данных
         try:
             worksheet = sh.worksheet(data_sheet_name)
         except gspread.WorksheetNotFound:
             worksheet = sh.add_worksheet(title=data_sheet_name, rows="2000", cols="25")
 
-        # Гарантируем корректность всех колонок
         for col in COLUMNS:
             if col not in df.columns:
                 df[col] = ''
@@ -191,17 +191,46 @@ def save_dept_data(dept_info, df):
         worksheet.clear()
         worksheet.update('A1', data_to_write)
 
+        # 2. Обновление сводного листа групп без перезаписи сохраненных раньше
         try:
-            wg_worksheet = sh.worksheet(workgroup_sheet_name)
-            summary_df = build_summary(df)
+            try:
+                wg_worksheet = sh.worksheet(workgroup_sheet_name)
+                existing_vals = wg_worksheet.get_all_values()
+            except gspread.WorksheetNotFound:
+                wg_worksheet = sh.add_worksheet(title=workgroup_sheet_name, rows="1000", cols="20")
+                existing_vals = []
 
-            if not summary_df.empty:
-                wg_data = [summary_df.columns.tolist()] + summary_df.fillna('').astype(str).values.tolist()
+            new_summary_df = build_summary(df)
+
+            if not existing_vals or len(existing_vals) < 2:
+                if not new_summary_df.empty:
+                    wg_data = [new_summary_df.columns.tolist()] + new_summary_df.fillna('').astype(str).values.tolist()
+                    wg_worksheet.clear()
+                    wg_worksheet.update('A1', wg_data)
+            else:
+                old_headers = [str(h).strip() for h in existing_vals[0]]
+                old_df = pd.DataFrame(existing_vals[1:], columns=old_headers).astype(str)
+
+                if not new_summary_df.empty:
+                    for col in new_summary_df.columns:
+                        if col not in old_df.columns:
+                            old_df[col] = ''
+
+                    if 'Имя файла' in old_df.columns and 'Имя файла' in new_summary_df.columns:
+                        updated_files = new_summary_df['Имя файла'].unique()
+                        old_df_filtered = old_df[~old_df['Имя файла'].isin(updated_files)]
+                        final_summary = pd.concat([old_df_filtered, new_summary_df], ignore_index=True)
+                    else:
+                        final_summary = new_summary_df
+                else:
+                    final_summary = old_df
+
+                wg_data = [final_summary.columns.tolist()] + final_summary.fillna('').astype(str).values.tolist()
                 wg_worksheet.clear()
                 wg_worksheet.update('A1', wg_data)
 
         except Exception as wg_err:
-            st.warning(f"Данные сохранены, но не удалось обновить рабочий лист '{workgroup_sheet_name}': {wg_err}")
+            st.warning(f"Основные данные сохранены, но не удалось обновить сводный лист '{workgroup_sheet_name}': {wg_err}")
 
         return True
     except Exception as e:
@@ -897,7 +926,21 @@ dept = st.radio(
 dept_info = SHEET_MAP[dept]
 
 df = load_dept_data(dept_info['data'])
-summary_df = build_summary(df)
+
+# Считываем актуальный реестр с листа рабочих групп
+try:
+    gc = get_gspread_client()
+    sh = gc.open_by_url(SPREADSHEET_URL)
+    wg_worksheet = sh.worksheet(dept_info['workgroups'])
+    wg_vals = wg_worksheet.get_all_values()
+    if len(wg_vals) > 1:
+        summary_df = pd.DataFrame(wg_vals[1:], columns=[str(h).strip() for h in wg_vals[0]]).astype(str)
+        if 'Количество товаров' in summary_df.columns:
+            summary_df['Количество товаров'] = pd.to_numeric(summary_df['Количество товаров'], errors='coerce').fillna(0).astype(int)
+    else:
+        summary_df = build_summary(df)
+except Exception:
+    summary_df = build_summary(df)
 
 st.divider()
 
@@ -921,7 +964,6 @@ with col_upload:
                 if col not in uploaded_df.columns:
                     uploaded_df[col] = ''
 
-            # Объединяем существующие данные с новыми
             if not df.empty:
                 merged_df = pd.concat([df, uploaded_df], ignore_index=True)
             else:
@@ -989,21 +1031,21 @@ else:
         if new_df.empty:
             st.info("Нет новых групп.")
         else:
-            cols_new = ['Имя файла', 'Группа 3', 'Количество товаров', 'Дата добавления', 'Дней с добавления']
+            cols_new = [c for c in ['Имя файла', 'Группа 3', 'Количество товаров', 'Дата добавления', 'Дней с добавления'] if c in new_df.columns]
             st.dataframe(new_df[cols_new], use_container_width=True, hide_index=True)
 
     with tab_paused:
         if paused_df.empty:
             st.info("Нет групп на паузе.")
         else:
-            cols_paused = ['Имя файла', 'Группа 3', 'Количество товаров', 'Исполнитель', 'Дата паузы', 'Причина паузы']
+            cols_paused = [c for c in ['Имя файла', 'Группа 3', 'Количество товаров', 'Исполнитель', 'Дата паузы', 'Причина паузы'] if c in paused_df.columns]
             st.dataframe(paused_df[cols_paused], use_container_width=True, hide_index=True)
 
     with tab_work:
         if work_df.empty:
             st.info("Нет групп в работе.")
         else:
-            cols_work = ['Имя файла', 'Группа 3', 'Количество товаров', 'Исполнитель', 'Дата начала работы']
+            cols_work = [c for c in ['Имя файла', 'Группа 3', 'Количество товаров', 'Исполнитель', 'Дата начала работы'] if c in work_df.columns]
             st.dataframe(work_df[cols_work], use_container_width=True, hide_index=True)
 
     st.write("")
@@ -1023,5 +1065,5 @@ else:
         if completed_summary.empty:
             st.info("Завершенных групп пока нет.")
         else:
-            cols_completed = ['Имя файла', 'Группа 3', 'Количество товаров', 'Исполнитель', 'Дата начала работы', 'Дата завершения работы']
+            cols_completed = [c for c in ['Имя файла', 'Группа 3', 'Количество товаров', 'Исполнитель', 'Дата начала работы', 'Дата завершения работы'] if c in completed_summary.columns]
             st.dataframe(completed_summary[cols_completed], use_container_width=True, hide_index=True)
