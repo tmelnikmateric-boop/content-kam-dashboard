@@ -5,14 +5,42 @@ import streamlit as st
 # ==========================================
 # КОНСТАНТЫ СТАТУСОВ
 # ==========================================
-# Статусы для товаров (Загруженные данные контента)
+# Для отдельных товаров (Загруженные данные контента)
 STATUS_ITEM_NEW = "🆕 Новый"
 
-# Статусы для сводной таблицы групп (👥 Рабочие группы контента)
+# Для таблицы "👥 Рабочие группы контента"
 STATUS_GROUP_AVAILABLE = "🆕 Доступна"
 STATUS_IN_WORK = "🔄 В работе"
 STATUS_PAUSED = "⏸ На паузе"
 STATUS_COMPLETED = "✅ Готово"
+
+
+# ==========================================
+# ПРЕДВАРИТЕЛЬНАЯ ПОДГОТОВКА ДАННЫХ
+# ==========================================
+def prepare_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Заполняет пропуски (NaN) в ключевых столбцах.
+    Гарантирует, что группы с пустыми статусами или исполнителями не выпадут.
+    """
+    if df.empty:
+        return df
+
+    df = df.copy()
+
+    # Список текстовых колонок для нормализации
+    cols_to_clean = [
+        'ID группы', 'Группа', 'Наименование группы', 
+        'Статус', 'Статус группы', 'Исполнитель', 
+        'Дата взятия', 'Причина паузы', 'Дата паузы'
+    ]
+
+    for col in cols_to_clean:
+        if col in df.columns:
+            # Заменяем NaN и None на пустые строки и убираем лишние пробелы
+            df[col] = df[col].fillna('').astype(str).str.strip()
+
+    return df
 
 
 # ==========================================
@@ -27,18 +55,25 @@ def modal_take_in_work(df: pd.DataFrame, target_ids: list, executor_name: str) -
         st.error("Пожалуйста, укажите имя исполнителя.")
         return df
 
+    df = prepare_dataframe(df)
     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    mask = df['ID группы'].isin(target_ids) if 'ID группы' in df.columns else df.index.isin(target_ids)
 
-    # Присвоение статуса "🔄 В работе"
+    # Поиск по ID группы или по индексу
+    group_col = 'ID группы' if 'ID группы' in df.columns else 'Группа'
+    if group_col in df.columns:
+        mask = df[group_col].isin([str(x).strip() for x in target_ids])
+    else:
+        mask = df.index.isin(target_ids)
+
+    # Гарантированное присвоение статуса "🔄 В работе"
     df.loc[mask, 'Статус'] = STATUS_IN_WORK
     if 'Статус группы' in df.columns:
         df.loc[mask, 'Статус группы'] = STATUS_IN_WORK
 
     df.loc[mask, 'Исполнитель'] = executor_name.strip()
     df.loc[mask, 'Дата взятия'] = now_str
-    
-    # Очистка полей паузы при старте работы
+
+    # Очистка полей паузы
     if 'Причина паузы' in df.columns:
         df.loc[mask, 'Причина паузы'] = ''
     if 'Дата паузы' in df.columns:
@@ -54,7 +89,13 @@ def modal_unpause(df: pd.DataFrame, target_ids: list) -> pd.DataFrame:
     """
     Возвращает статус группы/товаров из паузы обратно в '🔄 В работе'.
     """
-    mask = df['ID группы'].isin(target_ids) if 'ID группы' in df.columns else df.index.isin(target_ids)
+    df = prepare_dataframe(df)
+
+    group_col = 'ID группы' if 'ID группы' in df.columns else 'Группа'
+    if group_col in df.columns:
+        mask = df[group_col].isin([str(x).strip() for x in target_ids])
+    else:
+        mask = df.index.isin(target_ids)
 
     # Возврат статуса "🔄 В работе"
     df.loc[mask, 'Статус'] = STATUS_IN_WORK
@@ -75,58 +116,63 @@ def modal_unpause(df: pd.DataFrame, target_ids: list) -> pd.DataFrame:
 def build_summary(df: pd.DataFrame) -> pd.DataFrame:
     """
     Формирует сводный реестр '👥 Рабочие группы контента'.
-    
-    Логика статусов группы:
-    - Новая/Не начатая группа -> '🆕 Доступна'
-    - В работе -> '🔄 В работе'
-    - На паузе -> '⏸ На паузе'
-    - Завершена -> '✅ Готово'
+    Не теряет новые группы со статусом '🆕 Доступна'.
     """
-    if df.empty:
+    if df is None or df.empty:
         return pd.DataFrame()
 
-    summary_rows = []
+    # 1. Очищаем датафрейм от NaN и пробелов
+    clean_df = prepare_dataframe(df)
 
-    # Определяем колонку с ID группы
-    group_col = 'ID группы' if 'ID группы' in df.columns else 'Группа'
-    grouped = df.groupby(group_col, sort=False)
+    summary_rows = []
+    group_col = 'ID группы' if 'ID группы' in clean_df.columns else 'Группа'
+
+    if group_col not in clean_df.columns:
+        st.warning(f"Колонка '{group_col}' не найдена в исходных данных.")
+        return pd.DataFrame()
+
+    # 2. dropna=False гарантирует, что ни одна группа не потеряется при группировке
+    grouped = clean_df.groupby(group_col, sort=False, dropna=False)
 
     for group_id, group_df in grouped:
+        str_group_id = str(group_id).strip()
+        
+        # Пропускаем только полностью пустые идентификаторы
+        if not str_group_id or str_group_id.lower() in ['nan', 'none']:
+            continue
+
         first_row = group_df.iloc[0]
 
-        st_val = str(first_row.get('Статус', '')).strip().lower()
-        st_grp = str(first_row.get('Статус группы', '')).strip().lower()
-        date_take = first_row.get('Дата взятия', '')
+        st_val = str(first_row.get('Статус', '')).lower()
+        st_grp = str(first_row.get('Статус группы', '')).lower()
+        date_take = str(first_row.get('Дата взятия', '')).lower()
+        executor = str(first_row.get('Исполнитель', '')).lower()
+
+        # --- ЛОГИКА ОПРЕДЕЛЕНИЯ СТАТУСА ---
         
-        # 1. Проверка на Завершено
+        # A. Завершенная группа
         is_completed = (
             st_val in ['готово', 'завершено', '✅ готово'] or 
             'готово' in st_grp or '✅' in st_grp
         )
-        
-        # 2. Проверка на Паузу
+
+        # B. На паузе
         is_paused = (
             st_val in ['на паузе', 'пауза', '⏸ на паузе'] or 
             'пауза' in st_grp or '⏸' in st_grp
         )
-        
-        # 3. Проверка на В работе
+
+        # C. В работе (есть исполнитель/дата взятия или соответствующий статус)
         is_in_work = (
             not is_completed and not is_paused and (
                 st_val in ['в работе', 'взято в работу', '🔄 в работе'] or 
-                'в работе' in st_grp or '🔄' in st_grp or bool(date_take)
+                'в работе' in st_grp or '🔄' in st_grp or 
+                (bool(date_take) and date_take not in ['', 'nan', 'none']) or
+                (bool(executor) and executor not in ['', 'nan', 'none'])
             )
         )
 
-        # 4. Проверка на Новую группу (Доступна)
-        is_new = (
-            not is_completed and not is_paused and not is_in_work and (
-                st_val in ['', 'nan', 'none', 'новый', '🆕 новый', 'доступна', '🆕 доступна', 'не начато'] or
-                st_grp in ['', 'nan', 'none', 'доступна', '🆕 доступна', 'не начато']
-            )
-        )
-
-        # Присвоение итогового статуса для таблицы "👥 Рабочие группы контента"
+        # D. Выбор итогового статуса группы
         if is_completed:
             final_status = STATUS_COMPLETED
         elif is_paused:
@@ -134,12 +180,17 @@ def build_summary(df: pd.DataFrame) -> pd.DataFrame:
         elif is_in_work:
             final_status = STATUS_IN_WORK
         else:
-            # Для всех новых / непомеченных групп
+            # Все остальные варианты (включая пустые статусы) — "🆕 Доступна"
             final_status = STATUS_GROUP_AVAILABLE
 
+        # Получаем наименование группы
+        group_name = first_row.get('Наименование группы', '')
+        if not group_name:
+            group_name = first_row.get('Группа', str_group_id)
+
         summary_rows.append({
-            'ID группы': group_id,
-            'Наименование группы': first_row.get('Наименование группы', first_row.get('Группа', '')),
+            'ID группы': str_group_id,
+            'Наименование группы': group_name,
             'Количество товаров': len(group_df),
             'Статус': final_status,
             'Исполнитель': first_row.get('Исполнитель', ''),
@@ -147,5 +198,4 @@ def build_summary(df: pd.DataFrame) -> pd.DataFrame:
             'Причина паузы': first_row.get('Причина паузы', '') if is_paused else ''
         })
 
-    summary_df = pd.DataFrame(summary_rows)
-    return summary_df
+    return pd.DataFrame(summary_rows)
