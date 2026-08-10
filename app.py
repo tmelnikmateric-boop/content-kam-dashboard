@@ -88,15 +88,6 @@ st.markdown(
         color: #2c3e50 !important;
         vertical-align: middle !important;
     }
-
-    .compact-form label {
-        font-size: 0.78rem !important;
-        margin-bottom: -4px !important;
-    }
-    .compact-form input {
-        padding: 4px 8px !important;
-        font-size: 0.85rem !important;
-    }
     </style>
 """,
     unsafe_allow_html=True,
@@ -118,6 +109,7 @@ SHEET_MAP = {
     },
 }
 
+# Точный список столбцов под вашу Гугл Таблицу
 COLUMNS = [
     'ID',
     'Внешний код',
@@ -128,13 +120,8 @@ COLUMNS = [
     'Дата взятия',
     'Дата выполнения',
     'Дата завершения работы',
-    'Причина паузы',
     'Источник',
     'Дата загрузки',
-    'Дата паузы',
-    'Имя файла',
-    'Дата добавления файла',
-    'Статус группы',
 ]
 
 CONTACTS_SHEET_NAME = '📇 Контакты поставщиков'
@@ -209,7 +196,7 @@ def load_dept_data(sheet_name):
 
 
 def save_dept_data(dept_info, df):
-  """Бережное сохранение сырых данных и сводки без удаления старых данных из Google Таблицы."""
+  """Сохранение сырых данных и обновление сводного реестра."""
   data_sheet_name = dept_info['data']
   workgroup_sheet_name = dept_info['workgroups']
 
@@ -217,7 +204,6 @@ def save_dept_data(dept_info, df):
     gc = get_gspread_client()
     sh = gc.open_by_url(SPREADSHEET_URL)
 
-    # 1. Читаем имеющиеся данные с сырого листа
     try:
       worksheet = sh.worksheet(data_sheet_name)
       existing_vals = worksheet.get_all_values()
@@ -239,16 +225,16 @@ def save_dept_data(dept_info, df):
         if col not in df.columns:
           df[col] = ''
 
-      # Исключаем из старых данных обновленные файлы
-      source_col = 'Имя файла'
-      updated_files = (
-          df[source_col].replace('', np.nan).fillna(df['Источник']).unique()
+      # Группируем по полю "Источник"
+      updated_sources = (
+          df['Источник']
+          .replace('', np.nan)
+          .fillna(df.get('Имя файла', ''))
+          .unique()
       )
+      old_sources = old_data_df['Источник'].replace('', np.nan).fillna('')
 
-      old_source = old_data_df[source_col].replace('', np.nan).fillna(
-          old_data_df['Источник']
-      )
-      old_filtered = old_data_df[~old_source.isin(updated_files)]
+      old_filtered = old_data_df[~old_sources.isin(updated_sources)]
       full_df = pd.concat([old_filtered, df[COLUMNS]], ignore_index=True)
     else:
       full_df = df[COLUMNS]
@@ -259,7 +245,7 @@ def save_dept_data(dept_info, df):
     worksheet.clear()
     worksheet.update(range_name='A1', values=data_to_write)
 
-    # 2. Пересчитываем сводный реестр
+    # Перерасчет и обновление сводной таблицы групп
     try:
       try:
         wg_worksheet = sh.worksheet(workgroup_sheet_name)
@@ -279,7 +265,8 @@ def save_dept_data(dept_info, df):
 
     except Exception as wg_err:
       st.warning(
-          f"Основные данные сохранены, но не удалось обновить сводный лист '{workgroup_sheet_name}': {wg_err}"
+          f"Основные данные сохранены, но не удалось обновить лист"
+          f" '{workgroup_sheet_name}': {wg_err}"
       )
 
     return True
@@ -518,7 +505,7 @@ def append_new_products(uploaded_df):
 
 
 # ==========================================
-# 2. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# 2. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ И СВОДКА
 # ==========================================
 def calculate_business_days(date_str):
   if not date_str or str(date_str).lower() in ['nan', 'none', '']:
@@ -535,36 +522,27 @@ def calculate_business_days(date_str):
 
 
 def build_summary(df):
+  """Построение группы на базе колонки 'Источник' и даты 'Дата загрузки'."""
   if df.empty:
     return pd.DataFrame()
 
   temp_df = df.copy()
 
-  file_col = temp_df['Имя файла'].astype(str).str.strip()
-  source_col = (
-      temp_df['Источник'].astype(str).str.strip()
-      if 'Источник' in temp_df.columns
-      else pd.Series('', index=temp_df.index)
-  )
-  date_col = (
-      temp_df['Дата добавления файла'].astype(str).str.strip()
-      if 'Дата добавления файла' in temp_df.columns
-      else pd.Series('', index=temp_df.index)
-  )
+  # Выделяем ключевое поле для группировки — Источник
+  if 'Источник' in temp_df.columns:
+    source_series = temp_df['Источник'].astype(str).str.strip()
+  elif 'Имя файла' in temp_df.columns:
+    source_series = temp_df['Имя файла'].astype(str).str.strip()
+  else:
+    source_series = pd.Series('Без названия', index=temp_df.index)
 
-  fallback_name = 'Без имени (' + date_col.replace('', 'Без даты') + ')'
-
-  temp_df['Имя файла'] = (
-      file_col.replace('', np.nan)
-      .fillna(source_col)
-      .replace('', np.nan)
-      .fillna(fallback_name)
-  )
+  group_keys = source_series.replace('', 'Без названия').fillna('Без названия')
+  temp_df['Группа_Ключ'] = group_keys
 
   summary_rows = []
-  grouped = temp_df.groupby('Имя файла', sort=False)
+  grouped = temp_df.groupby('Группа_Ключ', sort=False)
 
-  for filename, group in grouped:
+  for group_name, group in grouped:
     total = len(group)
     first_row = group.iloc[0]
 
@@ -581,11 +559,11 @@ def build_summary(df):
     st_grp = str(first_row.get('Статус группы', '')).strip().lower()
 
     date_done = get_clean_val(['Дата завершения работы', 'Дата выполнения'])
-    date_take = get_clean_val(['Дата начала работы', 'Дата взятия'])
+    date_take = get_clean_val(['Дата взятия', 'Дата начала работы'])
     pause_reason = get_clean_val(['Причина паузы', 'Причина'])
-    date_pause = get_clean_val(['Дата паузы', 'Дата постановки на паузу'])
+    date_pause = get_clean_val(['Дата паузы'])
     date_added = get_clean_val(
-        ['Дата добавления файла', 'Дата загрузки', 'Дата добавления']
+        ['Дата загрузки', 'Дата добавления файла', 'Дата добавления']
     )
 
     is_completed = (
@@ -600,24 +578,29 @@ def build_summary(df):
         ]
         or 'выполнен' in st_grp
         or 'выполнено' in st_grp
-        or 'заверш' in st_grp
+        or bool(date_done)
     )
+
     is_paused = (
         st_val in ['пауза', 'на паузе', '⏸️ на паузе']
         or 'пауз' in st_grp
-        or '⏸️' in st_grp
         or '⏸' in st_val
     )
-    is_in_work = not is_completed and not is_paused and (
-        st_val
-        in [
-            'в работе',
-            'взято в работу',
-            'взята в работу',
-            '🔄 в работе',
-        ]
-        or 'в работе' in st_grp
-        or '🔄' in st_grp
+
+    is_in_work = (
+        not is_completed
+        and not is_paused
+        and (
+            st_val
+            in [
+                'в работе',
+                'взято в работу',
+                'взята в работу',
+                '🔄 в работе',
+            ]
+            or 'в работе' in st_grp
+            or bool(date_take)
+        )
     )
 
     if is_completed:
@@ -627,12 +610,13 @@ def build_summary(df):
     elif is_in_work:
       done_cnt, in_work_cnt, new_cnt, group_status = 0, total, 0, '🔄 В работе'
     else:
+      # По умолчанию статус «новый» или любой другой относим к «🆕 Новый»
       done_cnt, in_work_cnt, new_cnt, group_status = 0, 0, total, '🆕 Новый'
 
     days_passed = calculate_business_days(date_added)
 
     summary_rows.append({
-        'Имя файла': filename,
+        'Имя файла': group_name,
         'Группа 3': first_row.get('Группа 3', ''),
         'Количество товаров': total,
         'Новых': new_cnt,
@@ -720,19 +704,16 @@ def modal_take_in_work(dept_info, summary_df, df):
       st.warning('Укажите имя исполнителя!')
     else:
       now_str = datetime.datetime.now().strftime('%d.%m.%Y %H:%M:%S')
-      mask = df['Имя файла'].isin(selected_files) | df['Источник'].isin(
-          selected_files
-      )
+      mask = df['Источник'].isin(selected_files)
+      if 'Имя файла' in df.columns:
+        mask = mask | df['Имя файла'].isin(selected_files)
 
       df.loc[mask, 'Статус'] = 'В работе'
-      df.loc[mask, 'Статус группы'] = '🔄 В работе'
       df.loc[mask, 'Исполнитель'] = executor_name.strip()
       df.loc[mask, 'Дата взятия'] = now_str
-      df.loc[mask, 'Причина паузы'] = ''
-      df.loc[mask, 'Дата паузы'] = ''
 
       if save_dept_data(dept_info, df):
-        st.success("Статус обновлен на '🔄 В работе'")
+        st.success("Статус обновлен на 'В работе'")
         st.rerun()
 
 
@@ -763,14 +744,15 @@ def modal_pause(dept_info, summary_df, df):
       st.warning('Отметьте хотя бы один файл!')
     else:
       now_str = datetime.datetime.now().strftime('%d.%m.%Y %H:%M:%S')
-      mask = df['Имя файла'].isin(selected_files) | df['Источник'].isin(
-          selected_files
-      )
+      mask = df['Источник'].isin(selected_files)
+      if 'Имя файла' in df.columns:
+        mask = mask | df['Имя файла'].isin(selected_files)
 
-      df.loc[mask, 'Статус'] = '⏸️ На паузе'
-      df.loc[mask, 'Статус группы'] = '⏸️ На паузе'
-      df.loc[mask, 'Причина паузы'] = pause_reason
-      df.loc[mask, 'Дата паузы'] = now_str
+      df.loc[mask, 'Статус'] = 'Пауза'
+      if 'Причина паузы' in df.columns:
+        df.loc[mask, 'Причина паузы'] = pause_reason
+      if 'Дата паузы' in df.columns:
+        df.loc[mask, 'Дата паузы'] = now_str
 
       if save_dept_data(dept_info, df):
         st.success('Файлы переведены на паузу!')
@@ -800,14 +782,15 @@ def modal_unpause(dept_info, summary_df, df):
     if not selected_files:
       st.warning('Отметьте хотя бы один файл!')
     else:
-      mask = df['Имя файла'].isin(selected_files) | df['Источник'].isin(
-          selected_files
-      )
+      mask = df['Источник'].isin(selected_files)
+      if 'Имя файла' in df.columns:
+        mask = mask | df['Имя файла'].isin(selected_files)
 
       df.loc[mask, 'Статус'] = 'В работе'
-      df.loc[mask, 'Статус группы'] = '🔄 В работе'
-      df.loc[mask, 'Причина паузы'] = ''
-      df.loc[mask, 'Дата паузы'] = ''
+      if 'Причина паузы' in df.columns:
+        df.loc[mask, 'Причина паузы'] = ''
+      if 'Дата паузы' in df.columns:
+        df.loc[mask, 'Дата паузы'] = ''
 
       if save_dept_data(dept_info, df):
         st.success('Файлы успешно возвращены в работу!')
@@ -836,17 +819,16 @@ def modal_complete(dept_info, summary_df, df):
       st.warning('Отметьте хотя бы один файл!')
     else:
       now_str = datetime.datetime.now().strftime('%d.%m.%Y %H:%M:%S')
-      mask = df['Имя файла'].isin(selected_files) | df['Источник'].isin(
-          selected_files
-      )
+      mask = df['Источник'].isin(selected_files)
+      if 'Имя файла' in df.columns:
+        mask = mask | df['Имя файла'].isin(selected_files)
 
-      df.loc[mask, 'Статус'] = '✅ Выполнен'
-      df.loc[mask, 'Статус группы'] = '✅ Выполнен'
+      df.loc[mask, 'Статус'] = 'Выполнено'
       df.loc[mask, 'Дата завершения работы'] = now_str
       df.loc[mask, 'Дата выполнения'] = now_str
 
       if save_dept_data(dept_info, df):
-        st.success("Статус обновлен на '✅ Выполнен'")
+        st.success("Статус обновлен на 'Выполнено'")
         st.rerun()
 
 
@@ -1183,15 +1165,13 @@ with col_upload:
     if st.button(f'Загрузить файл {dept.lower()}', use_container_width=True):
       raw_uploaded_df = pd.read_excel(uploaded_file)
 
-      # Маппим колонки для сохранения импортированных полей
+      # Формируем структуру с использованием Источник и Дата загрузки
       uploaded_df = map_excel_columns(raw_uploaded_df)
       now_str = datetime.datetime.now().strftime('%d.%m.%Y %H:%M:%S')
 
-      uploaded_df['Имя файла'] = uploaded_file.name
       uploaded_df['Источник'] = uploaded_file.name
-      uploaded_df['Дата добавления файла'] = now_str
+      uploaded_df['Дата загрузки'] = now_str
       uploaded_df['Статус'] = 'Новый'
-      uploaded_df['Статус группы'] = '🆕 Новый'
 
       for col in COLUMNS:
         if col not in uploaded_df.columns:
