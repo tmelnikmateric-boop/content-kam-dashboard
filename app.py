@@ -147,6 +147,7 @@ def get_gspread_client():
     return gspread.authorize(creds)
 
 def load_dept_data(sheet_name):
+    """Загрузка сырых данных напрямую из Google Таблицы."""
     try:
         gc = get_gspread_client()
         sh = gc.open_by_url(SPREADSHEET_URL)
@@ -167,7 +168,7 @@ def load_dept_data(sheet_name):
         return pd.DataFrame(columns=COLUMNS)
 
 def save_dept_data(dept_info, df):
-    """Сохранение сырых данных и бережное обновление сводной таблицы рабочих групп без потери истории."""
+    """Бережное сохранение сырых данных и сводки без удаления старых данных из Google Таблицы."""
     data_sheet_name = dept_info['data']
     workgroup_sheet_name = dept_info['workgroups']
 
@@ -175,57 +176,51 @@ def save_dept_data(dept_info, df):
         gc = get_gspread_client()
         sh = gc.open_by_url(SPREADSHEET_URL)
 
-        # 1. Сохранение основных данных
+        # 1. Читаем уже имеющиеся данные с сырого листа
         try:
             worksheet = sh.worksheet(data_sheet_name)
+            existing_vals = worksheet.get_all_values()
         except gspread.WorksheetNotFound:
             worksheet = sh.add_worksheet(title=data_sheet_name, rows="2000", cols="25")
+            existing_vals = []
 
-        for col in COLUMNS:
-            if col not in df.columns:
-                df[col] = ''
-                
-        df_to_save = df[COLUMNS].fillna('').astype(str)
-        data_to_write = [COLUMNS] + df_to_save.values.tolist()
+        if existing_vals and len(existing_vals) > 1:
+            old_headers = [str(h).strip() for h in existing_vals[0]]
+            old_data_df = pd.DataFrame(existing_vals[1:], columns=old_headers).astype(str)
+            
+            # Объединяем существующие данные с обновляемым df
+            for col in COLUMNS:
+                if col not in old_data_df.columns:
+                    old_data_df[col] = ''
+                if col not in df.columns:
+                    df[col] = ''
+
+            # Исключаем из старых данных обновленные файлы
+            source_col = 'Имя файла' if 'Имя файла' in df.columns else 'Источник'
+            updated_files = df[source_col].unique()
+            
+            old_filtered = old_data_df[~old_data_df[source_col].isin(updated_files)]
+            full_df = pd.concat([old_filtered, df[COLUMNS]], ignore_index=True)
+        else:
+            full_df = df[COLUMNS]
+
+        full_df = full_df.fillna('').astype(str)
+        data_to_write = [COLUMNS] + full_df.values.tolist()
 
         worksheet.clear()
         worksheet.update('A1', data_to_write)
 
-        # 2. Обновление сводного листа групп без перезаписи сохраненных раньше
+        # 2. Пересчитываем сводный реестр из ВСЕХ накопленных данных
         try:
             try:
                 wg_worksheet = sh.worksheet(workgroup_sheet_name)
-                existing_vals = wg_worksheet.get_all_values()
             except gspread.WorksheetNotFound:
                 wg_worksheet = sh.add_worksheet(title=workgroup_sheet_name, rows="1000", cols="20")
-                existing_vals = []
 
-            new_summary_df = build_summary(df)
+            full_summary_df = build_summary(full_df)
 
-            if not existing_vals or len(existing_vals) < 2:
-                if not new_summary_df.empty:
-                    wg_data = [new_summary_df.columns.tolist()] + new_summary_df.fillna('').astype(str).values.tolist()
-                    wg_worksheet.clear()
-                    wg_worksheet.update('A1', wg_data)
-            else:
-                old_headers = [str(h).strip() for h in existing_vals[0]]
-                old_df = pd.DataFrame(existing_vals[1:], columns=old_headers).astype(str)
-
-                if not new_summary_df.empty:
-                    for col in new_summary_df.columns:
-                        if col not in old_df.columns:
-                            old_df[col] = ''
-
-                    if 'Имя файла' in old_df.columns and 'Имя файла' in new_summary_df.columns:
-                        updated_files = new_summary_df['Имя файла'].unique()
-                        old_df_filtered = old_df[~old_df['Имя файла'].isin(updated_files)]
-                        final_summary = pd.concat([old_df_filtered, new_summary_df], ignore_index=True)
-                    else:
-                        final_summary = new_summary_df
-                else:
-                    final_summary = old_df
-
-                wg_data = [final_summary.columns.tolist()] + final_summary.fillna('').astype(str).values.tolist()
+            if not full_summary_df.empty:
+                wg_data = [full_summary_df.columns.tolist()] + full_summary_df.fillna('').astype(str).values.tolist()
                 wg_worksheet.clear()
                 wg_worksheet.update('A1', wg_data)
 
@@ -925,9 +920,10 @@ dept = st.radio(
 
 dept_info = SHEET_MAP[dept]
 
+# 1. Загружаем сырые данные из Гугл Таблицы
 df = load_dept_data(dept_info['data'])
 
-# Считываем актуальный реестр с листа рабочих групп
+# 2. Пересчитываем или забираем свежую сводку из Google Таблицы напрямую
 try:
     gc = get_gspread_client()
     sh = gc.open_by_url(SPREADSHEET_URL)
@@ -964,12 +960,8 @@ with col_upload:
                 if col not in uploaded_df.columns:
                     uploaded_df[col] = ''
 
-            if not df.empty:
-                merged_df = pd.concat([df, uploaded_df], ignore_index=True)
-            else:
-                merged_df = uploaded_df
-
-            if save_dept_data(dept_info, merged_df):
+            # Сохраняем ТОЛЬКО новые загруженные строки через бережную функцию save_dept_data
+            if save_dept_data(dept_info, uploaded_df):
                 st.success(f"Файл '{uploaded_file.name}' успешно сохранен!")
                 st.rerun()
 
@@ -1016,10 +1008,11 @@ if summary_df.empty:
 else:
     st.subheader(f"📋 Реестр групп — {dept.upper()}")
 
-    new_df = summary_df[summary_df['Статус группы'] == '🆕 Новая'].copy().reset_index(drop=True)
-    paused_df = summary_df[summary_df['Статус группы'] == '⏸️ На паузе'].copy().reset_index(drop=True)
-    work_df = summary_df[summary_df['Статус группы'] == '🔄 В работе'].copy().reset_index(drop=True)
-    completed_summary = summary_df[summary_df['Статус группы'].isin(['✅ Выполнен', '✅ Завершена'])].copy().reset_index(drop=True)
+    # Фильтрация по статусам с учетом возможных префиксов и пробелов
+    new_df = summary_df[summary_df['Статус группы'].str.contains('Нов|🆕', case=False, na=False)].copy().reset_index(drop=True)
+    paused_df = summary_df[summary_df['Статус группы'].str.contains('пауз|⏸', case=False, na=False)].copy().reset_index(drop=True)
+    work_df = summary_df[summary_df['Статус группы'].str.contains('работ|🔄', case=False, na=False)].copy().reset_index(drop=True)
+    completed_summary = summary_df[summary_df['Статус группы'].str.contains('выполн|заверш|✅', case=False, na=False)].copy().reset_index(drop=True)
 
     tab_new, tab_paused, tab_work = st.tabs([
         f"🆕 Новые ({len(new_df)})", 
