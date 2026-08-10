@@ -173,7 +173,6 @@ def load_dept_data(sheet_name):
     if len(vals) > 1:
       headers = [str(h).strip() for h in vals[0]]
       df = pd.DataFrame(vals[1:], columns=headers).astype(str)
-      # Защита от одинаковых названий столбцов в таблице
       df = df.loc[:, ~df.columns.duplicated()].copy()
       df = df.replace({'nan': '', 'NaN': '', 'None': '', '<NA>': '', 'NaT': ''})
       for col in COLUMNS:
@@ -223,7 +222,7 @@ def save_dept_data(dept_info, df):
 
     full_df = full_df.fillna('').astype(str)
     
-    # Заполнение столбца A (ID / Номер по порядку) сквозной нумерацией 1..N
+    # Заполнение столбца A сквозной нумерацией 1..N
     full_df['ID'] = [str(i + 1) for i in range(len(full_df))]
 
     data_to_write = [COLUMNS] + full_df.values.tolist()
@@ -383,8 +382,17 @@ def parse_new_products_by_batches():
 
 
 def map_excel_columns(uploaded_df):
-  """Безопасный разбор столбцов из Excel файла во избежание дублирования колонок."""
+  """Разбор столбцов из Excel с фильтрацией пустых строк по первому столбцу."""
   uploaded_df = uploaded_df.loc[:, ~uploaded_df.columns.duplicated()].copy()
+
+  # Загружаем только те строки, у которых заполнен первый столбец
+  if not uploaded_df.empty and len(uploaded_df.columns) > 0:
+    first_col_str = uploaded_df.iloc[:, 0].astype(str).str.strip().str.lower()
+    uploaded_df = uploaded_df[
+        ~first_col_str.isin(['', 'nan', 'none', '<na>', 'nat', 'null'])
+        & uploaded_df.iloc[:, 0].notna()
+    ].copy()
+
   cols = list(uploaded_df.columns)
 
   def get_column_values(keywords, default_idx=None):
@@ -413,7 +421,6 @@ def append_new_products_batch(uploaded_files, progress_bar=None, status_text=Non
       worksheet = sh.add_worksheet(title=NEW_PRODUCTS_SHEET_NAME, rows='1000', cols='10')
       worksheet.append_row(NEW_PRODUCTS_COLUMNS)
 
-    managers_map = load_managers_mapping()
     now_str = datetime.datetime.now().strftime('%d.%m.%Y %H:%M')
 
     all_rows_to_append = []
@@ -440,9 +447,10 @@ def append_new_products_batch(uploaded_files, progress_bar=None, status_text=Non
       formatted_df = formatted_df.astype(str).replace({'nan': '', 'NaN': '', 'None': '', '<NA>': '', 'NaT': ''})
       formatted_df = formatted_df[NEW_PRODUCTS_COLUMNS]
 
-      date_header_row = [f'📅 Загрузка от {now_str} ({u_file.name})'] + [''] * (len(NEW_PRODUCTS_COLUMNS) - 1)
-      all_rows_to_append.append(date_header_row)
-      all_rows_to_append.extend(formatted_df.values.tolist())
+      if not formatted_df.empty:
+        date_header_row = [f'📅 Загрузка от {now_str} ({u_file.name})'] + [''] * (len(NEW_PRODUCTS_COLUMNS) - 1)
+        all_rows_to_append.append(date_header_row)
+        all_rows_to_append.extend(formatted_df.values.tolist())
 
       if progress_bar:
         progress_bar.progress(int(((idx + 1) / total_files) * 75))
@@ -1010,25 +1018,26 @@ with col_upload:
           u_file.seek(0)
           raw_uploaded_df = pd.read_excel(u_file)
 
-          # Разбор файла с четким распределением по столбцам A-K
+          # Разбор файла с фильтрацией и разбивкой по столбцам A-K
           mapped_data = map_excel_columns(raw_uploaded_df)
           num_rows = len(mapped_data['Внешний код'])
 
-          uploaded_df = pd.DataFrame({
-              'ID': [''] * num_rows,                       # A - Заполняется автоматической нумерацией
-              'Внешний код': mapped_data['Внешний код'],   # B - Из файла
-              'Группа 3': mapped_data['Группа 3'],         # C - Из файла
-              'Наименование': mapped_data['Наименование'], # D - Из файла
-              'Статус': ['🆕 Новый'] * num_rows,            # E - Статус по умолчанию
-              'Исполнитель': [''] * num_rows,              # F - Пустое
-              'Дата взятия': [''] * num_rows,              # G - Пустое
-              'Дата выполнения': [''] * num_rows,          # H - Пустое
-              'Дата завершения работы': [''] * num_rows,   # I - Пустое
-              'Источник': [u_file.name] * num_rows,        # J - Имя файла
-              'Дата загрузки': [now_str] * num_rows,       # K - Время загрузки
-          })
+          if num_rows > 0:
+            uploaded_df = pd.DataFrame({
+                'ID': [''] * num_rows,                       # A - Автоматическая нумерация
+                'Внешний код': mapped_data['Внешний код'],   # B - Из файла
+                'Группа 3': mapped_data['Группа 3'],         # C - Из файла
+                'Наименование': mapped_data['Наименование'], # D - Из файла
+                'Статус': ['🆕 Новый'] * num_rows,            # E - Статус по умолчанию
+                'Исполнитель': [''] * num_rows,              # F - Пустое
+                'Дата взятия': [''] * num_rows,              # G - Пустое
+                'Дата выполнения': [''] * num_rows,          # H - Пустое
+                'Дата завершения работы': [''] * num_rows,   # I - Пустое
+                'Источник': [u_file.name] * num_rows,        # J - Имя файла
+                'Дата загрузки': [now_str] * num_rows,       # K - Время загрузки
+            })
 
-          all_dfs.append(uploaded_df[COLUMNS])
+            all_dfs.append(uploaded_df[COLUMNS])
           progress_bar.progress(int(((idx + 1) / total_files) * 60))
 
         if all_dfs:
