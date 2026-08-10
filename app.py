@@ -128,6 +128,14 @@ COLUMNS = [
 CONTACTS_SHEET_NAME = '📇 Контакты поставщиков'
 CONTACT_COLUMNS = ['Производитель', 'Оф.сайт', 'Контакт', 'Имя', 'Группы товаров', 'Примечание']
 
+NEW_PRODUCTS_SHEET_NAME = 'Новые товары'
+MANAGERS_SHEET_NAME = 'Менеджеры'
+NEW_PRODUCTS_COLUMNS = [
+    'Внешний код', 'Наименование', 'Дата создания', 
+    'Цифровой код менеджера', 'Название раздела', 'Менеджер', 
+    'Контент', 'Выгружено в файл'
+]
+
 MONTH_NAMES = {
     1: "Январь", 2: "Февраль", 3: "Март", 4: "Апрель",
     5: "Май", 6: "Июнь", 7: "Июль", 8: "Август",
@@ -265,6 +273,103 @@ def add_contact_row(new_row_dict):
         return True
     except Exception as e:
         st.error(f"Ошибка сохранения контакта: {e}")
+        return False
+
+# ==========================================
+# 1.1 ЛОГИКА ДЛЯ "НОВЫХ ТОВАРОВ" И "МЕНЕДЖЕРОВ"
+# ==========================================
+def load_managers_mapping():
+    """Загружает словарь соответствия цифрового кода менеджеру из листа 'Менеджеры'"""
+    try:
+        gc = get_gspread_client()
+        sh = gc.open_by_url(SPREADSHEET_URL)
+        try:
+            worksheet = sh.worksheet(MANAGERS_SHEET_NAME)
+        except gspread.WorksheetNotFound:
+            return {}
+
+        records = worksheet.get_all_records()
+        if not records:
+            return {}
+
+        m_df = pd.DataFrame(records).astype(str)
+        m_df.columns = m_df.columns.astype(str).str.strip()
+
+        # Поиск наиболее подходящих колонок под Код и Имя/Фамилию
+        code_col = next((c for c in m_df.columns if 'код' in c.lower()), m_df.columns[0])
+        name_col = next((c for c in m_df.columns if any(k in c.lower() for k in ['менеджер', 'фамили', 'фио', 'имя'])), 
+                        m_df.columns[1] if len(m_df.columns) > 1 else m_df.columns[0])
+
+        return dict(zip(m_df[code_col].str.strip(), m_df[name_col].str.strip()))
+    except Exception as e:
+        st.error(f"Ошибка загрузки листа менеджеров: {e}")
+        return {}
+
+def load_new_products_data():
+    """Загружает данные листа 'Новые товары'"""
+    try:
+        gc = get_gspread_client()
+        sh = gc.open_by_url(SPREADSHEET_URL)
+        try:
+            worksheet = sh.worksheet(NEW_PRODUCTS_SHEET_NAME)
+        except gspread.WorksheetNotFound:
+            worksheet = sh.add_worksheet(title=NEW_PRODUCTS_SHEET_NAME, rows="1000", cols="10")
+            worksheet.append_row(NEW_PRODUCTS_COLUMNS)
+            return pd.DataFrame(columns=NEW_PRODUCTS_COLUMNS)
+
+        records = worksheet.get_all_records()
+        if records:
+            df = pd.DataFrame(records).astype(str)
+            df.columns = df.columns.astype(str).str.strip()
+            for col in NEW_PRODUCTS_COLUMNS:
+                if col not in df.columns:
+                    df[col] = ''
+            return df[NEW_PRODUCTS_COLUMNS]
+        return pd.DataFrame(columns=NEW_PRODUCTS_COLUMNS)
+    except Exception as e:
+        st.error(f"Ошибка загрузки листа 'Новые товары': {e}")
+        return pd.DataFrame(columns=NEW_PRODUCTS_COLUMNS)
+
+def append_new_products(uploaded_df):
+    """
+    Добавляет строку с датой загрузки и новые товары с автоподстановкой Менеджера (ВПР)
+    """
+    try:
+        gc = get_gspread_client()
+        sh = gc.open_by_url(SPREADSHEET_URL)
+        try:
+            worksheet = sh.worksheet(NEW_PRODUCTS_SHEET_NAME)
+        except gspread.WorksheetNotFound:
+            worksheet = sh.add_worksheet(title=NEW_PRODUCTS_SHEET_NAME, rows="1000", cols="10")
+            worksheet.append_row(NEW_PRODUCTS_COLUMNS)
+
+        # 1. Получаем сопоставление кодов менеджеров
+        managers_map = load_managers_mapping()
+
+        # 2. Форматируем и заполняем данные загружаемого файла
+        uploaded_df = uploaded_df.astype(str).replace({'nan': '', 'NaN': '', 'None': '', '<NA>': '', 'NaT': ''})
+        
+        # Автозаполнение Менеджера по Цифровому коду (аналог ВПР)
+        if 'Цифровой код менеджера' in uploaded_df.columns:
+            uploaded_df['Менеджер'] = uploaded_df['Цифровой код менеджера'].astype(str).str.strip().map(managers_map).fillna('')
+
+        for col in NEW_PRODUCTS_COLUMNS:
+            if col not in uploaded_df.columns:
+                uploaded_df[col] = ''
+
+        uploaded_df = uploaded_df[NEW_PRODUCTS_COLUMNS]
+
+        # 3. Формируем строку-разделитель с датой
+        now_str = datetime.datetime.now().strftime("%d.%m.%Y %H:%M")
+        date_header_row = [f"📅 Загрузка от {now_str}"] + [''] * (len(NEW_PRODUCTS_COLUMNS) - 1)
+
+        # 4. Дописываем разделитель и новые строки в Google Sheet
+        rows_to_append = [date_header_row] + uploaded_df.values.tolist()
+        worksheet.append_rows(rows_to_append)
+
+        return True
+    except Exception as e:
+        st.error(f"Ошибка сохранения новых товаров: {e}")
         return False
 
 # ==========================================
@@ -634,7 +739,6 @@ def modal_analytics():
 
 @st.dialog("📇 Контакты поставщиков")
 def modal_contacts():
-    # 1. Компактный формуляр добавления контактов вводом в одну строку
     with st.expander("➕ Добавить новый контакт поставщика", expanded=False):
         with st.form("add_contact_form", clear_on_submit=True):
             f_col1, f_col2, f_col3, f_col4, f_col5, f_col6 = st.columns([1.2, 1.2, 1.2, 1.2, 1.5, 2.0])
@@ -669,7 +773,6 @@ def modal_contacts():
                         st.success("Контакт сохранен!")
                         st.rerun()
 
-    # 2. Быстрый поиск по таблице
     contacts_df = load_contacts_data()
 
     col_search, _ = st.columns([2, 1])
@@ -684,7 +787,6 @@ def modal_contacts():
         else:
             filtered_contacts = contacts_df
 
-        # 3. Регулировка размеров колонок: Примечание шире, остальные с автопереносом текста
         column_configuration = {
             "Производитель": st.column_config.TextColumn("Производитель", width="medium"),
             "Оф.сайт": st.column_config.TextColumn("Оф.сайт", width="small"),
@@ -703,6 +805,57 @@ def modal_contacts():
         )
     else:
         st.info("Контакты пока не добавлены.")
+
+@st.dialog("📦 Новые товары (Еженедельная загрузка)")
+def modal_new_products():
+    st.markdown("<h4 style='font-weight: 500; font-size: 1.05rem; margin-top: 5px; margin-bottom: 12px;'>📥 Загрузка новых товаров из файла</h4>", unsafe_allow_html=True)
+
+    uploaded_file = st.file_uploader("Выберите .xlsx / .xls файл с новыми товарами", type=['xlsx', 'xls'], key="new_prod_file")
+
+    if uploaded_file is not None:
+        if st.button("🚀 Добавить выгрузку в таблицу", use_container_width=True):
+            try:
+                new_products_df = pd.read_excel(uploaded_file)
+                if append_new_products(new_products_df):
+                    st.success(f"Выгрузка '{uploaded_file.name}' успешно добавлена с подстановкой менеджеров!")
+                    st.rerun()
+            except Exception as e:
+                st.error(f"Ошибка чтения файла: {e}")
+
+    st.divider()
+
+    st.markdown("<h4 style='font-weight: 500; font-size: 1.05rem; margin-bottom: 12px;'>📋 Реестр новых товаров</h4>", unsafe_allow_html=True)
+    df_np = load_new_products_data()
+
+    if not df_np.empty:
+        search_query = st.text_input("🔍 Быстрый поиск по новым товарам:", "", placeholder="Введите наименование, код или фамилию...", key="search_np")
+        if search_query.strip():
+            q = search_query.lower()
+            mask = df_np.apply(lambda row: row.astype(str).str.lower().str.contains(q).any(), axis=1)
+            filtered_np = df_np[mask]
+        else:
+            filtered_np = df_np
+
+        np_column_config = {
+            "Внешний код": st.column_config.TextColumn("Внешний код", width="small"),
+            "Наименование": st.column_config.TextColumn("Наименование", width="large"),
+            "Дата создания": st.column_config.TextColumn("Дата создания", width="small"),
+            "Цифровой код менеджера": st.column_config.TextColumn("Код менеджера", width="small"),
+            "Название раздела": st.column_config.TextColumn("Название раздела", width="medium"),
+            "Менеджер": st.column_config.TextColumn("Менеджер", width="medium"),
+            "Контент": st.column_config.TextColumn("Контент", width="small"),
+            "Выгружено в файл": st.column_config.TextColumn("Выгружено в файл", width="small")
+        }
+
+        st.dataframe(
+            filtered_np,
+            use_container_width=True,
+            hide_index=True,
+            column_config=np_column_config,
+            height=450
+        )
+    else:
+        st.info("Данные по новым товарам пока отсутствуют.")
 
 # ==========================================
 # 4. ОСНОВНОЙ ИНТЕРФЕЙС STREAMLIT
@@ -724,7 +877,7 @@ summary_df = build_summary(df)
 
 st.divider()
 
-col_upload, col_actions, col_extra = st.columns([1.2, 1.8, 1.2])
+col_upload, col_actions, col_extra = st.columns([1.2, 1.8, 1.3])
 
 with col_upload:
     st.subheader(f"1. Загрузка файла ({dept.lower()})")
@@ -769,15 +922,18 @@ with col_actions:
 
 with col_extra:
     st.subheader("3. Дополнительная информация")
-    st.write("Просмотр отчетов и контактов:")
+    st.write("Просмотр отчетов, контактов и выгрузок:")
 
-    btn_ex1, btn_ex2 = st.columns(2)
+    btn_ex1, btn_ex2, btn_ex3 = st.columns(3)
 
     if btn_ex1.button("📊 Аналитика", use_container_width=True):
         modal_analytics()
 
     if btn_ex2.button("📇 Контакты", use_container_width=True):
         modal_contacts()
+
+    if btn_ex3.button("📦 Новые товары", use_container_width=True):
+        modal_new_products()
 
 st.divider()
 
