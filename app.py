@@ -1673,7 +1673,7 @@ def load_all_sheet_data():
 
 @st.cache_data(ttl=300)
 def load_group_order_data():
-  """Загружает данные с листа 'Порядок расположения групп на сайте'"""
+  """Загружает данные с листа 'Порядок расположения групп на сайте' с защитой PyArrow"""
   sheet_id = "1LABW3U4TdX6cDjps_g_mBBsWRW8_Xx7W8LqBZB4CO2g"
   try:
     gc = get_gspread_client()
@@ -1684,21 +1684,35 @@ def load_group_order_data():
     if not vals or len(vals) <= 1:
       return pd.DataFrame()
 
-    headers = [str(h).strip() for h in vals[0]]
-    # Формируем DataFrame без использования методов, вызывающих ambiguous Series boolean
+    # 1. Очищаем заголовки
+    raw_headers = [str(h).strip() for h in vals[0]]
+
+    # 2. Гарантируем уникальность названий колонок (устраняет ValueError в PyArrow)
+    headers = []
+    seen = {}
+    for idx, h in enumerate(raw_headers):
+      h_name = h if h else f"Столбец_{idx+1}"
+      if h_name in seen:
+        seen[h_name] += 1
+        headers.append(f"{h_name}_{seen[h_name]}")
+      else:
+        seen[h_name] = 0
+        headers.append(h_name)
+
+    # 3. Собираем DataFrame
     df_order = pd.DataFrame(vals[1:], columns=headers).astype(str)
 
-    # Безопасная очистка элементов по столбцам
+    # 4. Безопасная очистка чисел от .0
     for col in df_order.columns:
       df_order[col] = df_order[col].map(clean_number_str)
 
-    return df_order
+    return df_order.reset_index(drop=True)
+
   except Exception as e:
     st.error(
         f"Ошибка загрузки листа 'Порядок расположения групп на сайте': {e}"
     )
     return pd.DataFrame()
-
 
 def save_groups_data(df_to_save):
   """Сохраняет измененный DataFrame в Google Таблицу"""
