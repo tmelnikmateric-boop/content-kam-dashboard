@@ -1,3 +1,4 @@
+import base64
 import datetime
 import gspread
 from google.oauth2.service_account import Credentials
@@ -88,6 +89,23 @@ st.markdown(
         color: #2c3e50 !important;
         vertical-align: middle !important;
     }
+
+    .urgent-badge {
+        background-color: #ffebe9;
+        color: #cf222e;
+        padding: 3px 8px;
+        border-radius: 6px;
+        font-weight: 600;
+        font-size: 0.8rem;
+    }
+    .normal-badge {
+        background-color: #f0f2f5;
+        color: #57606a;
+        padding: 3px 8px;
+        border-radius: 6px;
+        font-weight: 500;
+        font-size: 0.8rem;
+    }
     </style>
 """,
     unsafe_allow_html=True,
@@ -144,6 +162,19 @@ NEW_PRODUCTS_COLUMNS = [
     'Название раздела',
     'Менеджер',
     'Контент',
+]
+
+TASKS_SHEET_NAME = '🎯 Задачи'
+TASK_COLUMNS = [
+    'ID',
+    'Тема',
+    'Описание',
+    'Исполнители',
+    'Статус',
+    'Срочность',
+    'Изображения Base64',
+    'Дата создания',
+    'Дата обновления',
 ]
 
 MONTH_NAMES = {
@@ -442,7 +473,58 @@ def append_new_products_batch(uploaded_files, progress_bar=None, status_text=Non
 
 
 # ==========================================
-# 2. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ И СВОДКА
+# 2. РАБОТА С ЛИСТОМ ЗАДАЧ
+# ==========================================
+def load_tasks_data():
+  """Загрузка списка задач из Google Таблицы."""
+  try:
+    gc = get_gspread_client()
+    sh = gc.open_by_url(SPREADSHEET_URL)
+    try:
+      worksheet = sh.worksheet(TASKS_SHEET_NAME)
+    except gspread.WorksheetNotFound:
+      worksheet = sh.add_worksheet(title=TASKS_SHEET_NAME, rows='1000', cols='15')
+      worksheet.append_row(TASK_COLUMNS)
+      return pd.DataFrame(columns=TASK_COLUMNS)
+
+    vals = worksheet.get_all_values()
+    if len(vals) > 1:
+      headers = [str(h).strip() for h in vals[0]]
+      df = pd.DataFrame(vals[1:], columns=headers).astype(str)
+      df = df.replace({'nan': '', 'NaN': '', 'None': '', '<NA>': '', 'NaT': ''})
+      for col in TASK_COLUMNS:
+        if col not in df.columns:
+          df[col] = ''
+      return df[TASK_COLUMNS]
+    return pd.DataFrame(columns=TASK_COLUMNS)
+  except Exception as e:
+    st.error(f'Ошибка загрузки задач: {e}')
+    return pd.DataFrame(columns=TASK_COLUMNS)
+
+
+def save_all_tasks(df):
+  """Сохранение и перезапись списка задач."""
+  try:
+    gc = get_gspread_client()
+    sh = gc.open_by_url(SPREADSHEET_URL)
+    try:
+      worksheet = sh.worksheet(TASKS_SHEET_NAME)
+    except gspread.WorksheetNotFound:
+      worksheet = sh.add_worksheet(title=TASKS_SHEET_NAME, rows='1000', cols='15')
+
+    df_to_save = df[TASK_COLUMNS].fillna('').astype(str)
+    data_to_write = [TASK_COLUMNS] + df_to_save.values.tolist()
+
+    worksheet.clear()
+    worksheet.update(range_name='A1', values=data_to_write)
+    return True
+  except Exception as e:
+    st.error(f'Ошибка сохранения списка задач: {e}')
+    return False
+
+
+# ==========================================
+# 3. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ И СВОДКА
 # ==========================================
 def calculate_business_days(date_str):
   if not date_str or str(date_str).lower() in ['nan', 'none', '']:
@@ -567,7 +649,7 @@ def render_grouped_html_table(df, group_col, cols_order, headers):
 
 
 # ==========================================
-# 3. МОДАЛЬНЫЕ ОКНА (DIALOGS)
+# 4. МОДАЛЬНЫЕ ОКНА (DIALOGS)
 # ==========================================
 
 @st.dialog('▶️ Взять файлы в работу')
@@ -943,8 +1025,76 @@ def modal_new_products():
     st.info('Данные по новым товарам пока отсутствуют.')
 
 
+@st.dialog('➕ Создать новую задачу')
+def modal_add_task():
+  with st.form('create_task_form', clear_on_submit=True):
+    task_title = st.text_input('Тема задачи *', placeholder='Введите краткое название задачи')
+    
+    col1, col2 = st.columns(2)
+    with col1:
+      task_urgency = st.selectbox('Срочность:', ['Текущая задача', 'Срочно'])
+    with col2:
+      task_status = st.selectbox('Начальный статус:', ['Новая', 'В работе', 'Завершена'])
+
+    executors_input = st.text_input(
+        'Исполнитель(и) *',
+        placeholder='Укажите одного или нескольких через запятую (напр.: Анна, Иван)',
+    )
+
+    st.caption('Описание поддерживает Markdown (списки `- [ ] пункт` для чек-боксов)')
+    task_desc = st.text_area(
+        'Описание задачи',
+        placeholder='- [ ] Подготовить отчет\n- [ ] Проверить фото\nПодробности...',
+        height=150,
+    )
+
+    uploaded_img = st.file_uploader(
+        'Прикрепить изображение',
+        type=['png', 'jpg', 'jpeg', 'webp'],
+        accept_multiple_files=False,
+    )
+
+    btn_create = st.form_submit_button('Создать задачу', use_container_width=True)
+
+    if btn_create:
+      if not task_title.strip():
+        st.warning('Заполните поле "Тема задачи"!')
+      elif not executors_input.strip():
+        st.warning('Укажите хотя бы одного исполнителя!')
+      else:
+        tasks_df = load_tasks_data()
+        next_id = str(len(tasks_df) + 1)
+        now_str = datetime.datetime.now().strftime('%d.%m.%Y %H:%M')
+
+        img_b64 = ''
+        if uploaded_img is not None:
+          bytes_data = uploaded_img.getvalue()
+          b64_str = base64.b64encode(bytes_data).decode('utf-8')
+          mime_type = uploaded_img.type
+          img_b64 = f'data:{mime_type};base64,{b64_str}'
+
+        execs_clean = ', '.join([e.strip() for e in executors_input.split(',') if e.strip()])
+
+        new_task = pd.DataFrame([{
+            'ID': next_id,
+            'Тема': task_title.strip(),
+            'Описание': task_desc.strip(),
+            'Исполнители': execs_clean,
+            'Статус': task_status,
+            'Срочность': task_urgency,
+            'Изображения Base64': img_b64,
+            'Дата создания': now_str,
+            'Дата обновления': now_str,
+        }])
+
+        updated_tasks = pd.concat([tasks_df, new_task], ignore_index=True)
+        if save_all_tasks(updated_tasks):
+          st.success('Задача успешно создана!')
+          st.rerun()
+
+
 # ==========================================
-# 4. ОСНОВНОЙ ИНТЕРФЕЙС STREAMLIT
+# 5. ОСНОВНОЙ ИНТЕРФЕЙС STREAMLIT
 # ==========================================
 
 # 1. Заголовок
@@ -1143,7 +1293,104 @@ with main_tab2:
     st.info("Раздел 'Открытие новых групп' находится в разработке.")
 
 # ------------------------------------------
-# ВКЛАДКА 3: ЗАДАЧИ (ПУСТО)
+# ВКЛАДКА 3: ЗАДАЧИ
 # ------------------------------------------
 with main_tab3:
-    st.info("Раздел 'Задачи' находится в разработке.")
+    col_t_title, col_t_btn = st.columns([3, 1])
+    with col_t_title:
+      st.subheader('🎯 Менеджер задач')
+    with col_t_btn:
+      if st.button('➕ Добавить задачу', use_container_width=True):
+        modal_add_task()
+
+    st.divider()
+
+    tasks_df = load_tasks_data()
+
+    if tasks_df.empty:
+      st.info('Задач пока нет. Нажмите «Добавить задачу», чтобы создать первую.')
+    else:
+      # Фильтрация по статусам
+      new_tasks = tasks_df[tasks_df['Статус'] == 'Новая']
+      work_tasks = tasks_df[tasks_df['Статус'] == 'В работе']
+      done_tasks = tasks_df[tasks_df['Статус'] == 'Завершена']
+
+      t_tab1, t_tab2, t_tab3 = st.tabs([
+          f'🆕 Новые ({len(new_tasks)})',
+          f'🔄 В работе ({len(work_tasks)})',
+          f'✅ Завершенные ({len(done_tasks)})',
+      ])
+
+      def render_task_card(row):
+        t_id = row['ID']
+        t_title = row['Тема']
+        t_desc = row['Описание']
+        t_execs = row['Исполнители']
+        t_status = row['Статус']
+        t_urgency = row['Срочность']
+        t_img = row['Изображения Base64']
+        t_date = row['Дата создания']
+
+        is_urgent = t_urgency == 'Срочно'
+        badge_html = (
+            f"<span class='urgent-badge'>🔥 {t_urgency}</span>"
+            if is_urgent
+            else f"<span class='normal-badge'>📌 {t_urgency}</span>"
+        )
+
+        with st.expander(f"#{t_id} | {t_title} — {t_execs}", expanded=False):
+          st.markdown(f"**Срочность:** {badge_html}", unsafe_allow_html=True)
+          st.markdown(f"**Исполнитель(и):** {t_execs}")
+          st.caption(f"Дата создания: {t_date}")
+
+          st.divider()
+
+          if t_desc:
+            st.markdown("**Описание:**")
+            st.markdown(t_desc)
+
+          if t_img:
+            st.write('')
+            st.image(t_img, caption='Прикрепленное изображение', width=350)
+
+          st.divider()
+
+          # Управление статусом задачи
+          c_sel, c_sav = st.columns([2, 1])
+          with c_sel:
+            new_st = st.selectbox(
+                'Изменить статус:',
+                ['Новая', 'В работе', 'Завершена'],
+                index=['Новая', 'В работе', 'Завершена'].index(t_status) if t_status in ['Новая', 'В работе', 'Завершена'] else 0,
+                key=f'status_sel_{t_id}',
+            )
+          with c_sav:
+            st.write('')
+            st.write('')
+            if st.button('Сохранить', key=f'btn_save_status_{t_id}'):
+              tasks_df.loc[tasks_df['ID'] == t_id, 'Статус'] = new_st
+              tasks_df.loc[tasks_df['ID'] == t_id, 'Дата обновления'] = datetime.datetime.now().strftime('%d.%m.%Y %H:%M')
+              if save_all_tasks(tasks_df):
+                st.success('Статус задачи сохранен!')
+                st.rerun()
+
+      with t_tab1:
+        if new_tasks.empty:
+          st.info('Новых задач нет.')
+        else:
+          for _, task_row in new_tasks.iterrows():
+            render_task_card(task_row)
+
+      with t_tab2:
+        if work_tasks.empty:
+          st.info('Задач в работе нет.')
+        else:
+          for _, task_row in work_tasks.iterrows():
+            render_task_card(task_row)
+
+      with t_tab3:
+        if done_tasks.empty:
+          st.info('Завершенных задач нет.')
+        else:
+          for _, task_row in done_tasks.iterrows():
+            render_task_card(task_row)
