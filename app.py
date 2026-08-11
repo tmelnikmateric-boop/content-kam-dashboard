@@ -1590,21 +1590,26 @@ with main_tab3:
 # ==========================================
 # Вкладка 2 ОТКРЫТИЕ ГРУПП
 # ==========================================
-
 # ==========================================
 # 1. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ И ОЧИСТКА
 # ==========================================
 
 
 def clean_number_str(val):
-  """Убирает .0 и форматирует числа"""
+  """Убирает .0, float-мусор и форматирует числа безопасно для Pandas Series"""
+  if isinstance(val, (pd.Series, list, tuple)):
+    return val
+
   if pd.isna(val) or val is None:
     return ""
+
   s = str(val).strip()
   if not s or s.lower() in ["nan", "none", "<na>", "nat"]:
     return ""
+
   if s.endswith(".0"):
     return s[:-2]
+
   try:
     f = float(s)
     if f.is_integer():
@@ -1640,8 +1645,9 @@ def load_all_sheet_data():
       vals_mat = ws_mat.get_all_values()
       if len(vals_mat) > 1:
         for row in vals_mat[1:]:
-          if len(row) >= 2 and row[0].strip():
-            dict_materik[row[0].strip().lower()] = clean_number_str(row[1])
+          if len(row) >= 2 and str(row[0]).strip():
+            key = str(row[0]).strip().lower()
+            dict_materik[key] = clean_number_str(row[1])
     except Exception:
       pass
 
@@ -1652,8 +1658,9 @@ def load_all_sheet_data():
       vals_pal = ws_pal.get_all_values()
       if len(vals_pal) > 1:
         for row in vals_pal[1:]:
-          if len(row) >= 2 and row[0].strip():
-            dict_palas[row[0].strip().lower()] = clean_number_str(row[1])
+          if len(row) >= 2 and str(row[0]).strip():
+            key = str(row[0]).strip().lower()
+            dict_palas[key] = clean_number_str(row[1])
     except Exception:
       pass
 
@@ -1674,21 +1681,21 @@ def load_group_order_data():
     ws = sh.worksheet("Порядок расположения групп на сайте")
     vals = ws.get_all_values()
 
-    if len(vals) <= 1:
+    if not vals or len(vals) <= 1:
       return pd.DataFrame()
 
     headers = [str(h).strip() for h in vals[0]]
+    # Формируем DataFrame без использования методов, вызывающих ambiguous Series boolean
     df_order = pd.DataFrame(vals[1:], columns=headers).astype(str)
 
-    # Очистка от .0 и фантомных строк
+    # Безопасная очистка элементов по столбцам
     for col in df_order.columns:
-      df_order[col] = df_order[col].apply(clean_number_str)
+      df_order[col] = df_order[col].map(clean_number_str)
 
     return df_order
   except Exception as e:
     st.error(
-        "Ошибка загрузки листа 'Порядок расположения групп на сайте':"
-        f" {e}"
+        f"Ошибка загрузки листа 'Порядок расположения групп на сайте': {e}"
     )
     return pd.DataFrame()
 
@@ -1737,7 +1744,7 @@ def group_editor_dialog(row_data, row_index, full_df, dict_materik, dict_palas):
       )
 
     # Авторасчет статусов ВПР при указании Группы 3
-    grp_key = g3.strip().lower()
+    grp_key = str(g3).strip().lower()
     mat_val = dict_materik.get(
         grp_key, row_data.get("Влючено Материк", "") if not is_new else ""
     )
@@ -1904,9 +1911,9 @@ with main_tab2:
 
     df_proc = df_raw[target_columns].copy()
 
-    # Чистим числа во всей таблице
+    # Чистим числа во всей таблице через map
     for col in df_proc.columns:
-      df_proc[col] = df_proc[col].apply(clean_number_str)
+      df_proc[col] = df_proc[col].map(clean_number_str)
 
     # Автозаполнение ВПР при загрузке
     def apply_vlookup(row):
