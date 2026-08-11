@@ -152,6 +152,61 @@ st.markdown(
         display: inline-flex;
         align-items: center;
     }
+    /* СТИЛИ ДЛЯ ВЫВОДА ГРУПП С ФИКСИРОВАННЫМИ СТОЛБЦАМИ И КОМПАКТНЫМ ВИДОМ */
+    .groups-table-container {
+        max-height: 680px;
+        overflow: auto;
+        border: 1px solid #e6e8eb;
+        border-radius: 8px;
+    }
+    .groups-table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        font-size: 0.78rem;
+    }
+    .groups-table th {
+        position: sticky;
+        top: 0;
+        background: #f8f9fa;
+        z-index: 10;
+        padding: 6px 4px;
+        white-space: normal !important;
+        word-wrap: break-word;
+        max-width: 100px;
+        text-align: center;
+        vertical-align: middle;
+        font-weight: 600;
+        border-bottom: 2px solid #d0d7de;
+        border-right: 1px solid #e6e8eb;
+        line-height: 1.2;
+    }
+    .groups-table td {
+        padding: 4px 6px;
+        border-bottom: 1px solid #f0f2f5;
+        border-right: 1px solid #f0f2f5;
+        white-space: nowrap;
+        background-color: #ffffff;
+        text-align: center;
+    }
+    /* Фиксирование первых трех столбцов (Группа 1, Группа 2, Группа 3) */
+    .groups-table th:nth-child(1), .groups-table td:nth-child(1) {
+        position: sticky; left: 0; width: 130px; min-width: 130px; max-width: 130px;
+    }
+    .groups-table th:nth-child(2), .groups-table td:nth-child(2) {
+        position: sticky; left: 130px; width: 130px; min-width: 130px; max-width: 130px;
+    }
+    .groups-table th:nth-child(3), .groups-table td:nth-child(3) {
+        position: sticky; left: 260px; width: 130px; min-width: 130px; max-width: 130px; border-right: 2px solid #d0d7de;
+    }
+    .groups-table td:nth-child(1), .groups-table td:nth-child(2), .groups-table td:nth-child(3) {
+        background-color: #fcfcfd;
+        text-align: left;
+        z-index: 5;
+    }
+    .groups-table th:nth-child(1), .groups-table th:nth-child(2), .groups-table th:nth-child(3) {
+        z-index: 15;
+    }
     </style>
 """,
     unsafe_allow_html=True,
@@ -1566,21 +1621,84 @@ def load_groups_data():
     existing_cols = [c for c in target_columns if c in df.columns]
     return df[existing_cols].fillna("")
 
+# ==========================================
+# ВПОМОГАТЕЛЬНАЯ ФУНКЦИЯ ОТОБРАЖЕНИЯ ТАБЛИЦЫ
+# ==========================================
+def render_groups_table(df):
+    if df.empty:
+        st.info("Нет данных в данном разделе.")
+        return
+
+    headers_html = "".join([f"<th>{col}</th>" for col in df.columns])
+    
+    rows_html = []
+    for _, row in df.iterrows():
+        cells = "".join([f"<td>{val}</td>" for val in row])
+        rows_html.append(f"<tr>{cells}</tr>")
+    
+    table_html = f"""
+    <div class="groups-table-container">
+        <table class="groups-table">
+            <thead>
+                <tr>{headers_html}</tr>
+            </thead>
+            <tbody>
+                {"".join(rows_html)}
+            </tbody>
+        </table>
+    </div>
+    """
+    st.markdown(table_html, unsafe_allow_html=True)
+
 # ------------------------------------------
 # ВКЛАДКА 2: ОТКРЫТИЕ НОВЫХ ГРУПП
 # ------------------------------------------
 with main_tab2:
     st.subheader("📋 Вывод групп")
+    
     try:
-        groups_df = load_groups_data()
-        if not groups_df.empty:
-            st.dataframe(
-                groups_df,
-                use_container_width=True,
-                hide_index=True,
-                height=650,
-            )
+        raw_df = load_groups_data()
+        
+        if not raw_df.empty:
+            # Очистка строк от лишних пробелов для точного фильтра
+            kam_col = "Добавлено в файл КАМ"
+            date_col = "Дата вывода на Материк (с товарами)"
+            
+            kam_series = raw_df[kam_col].astype(str).str.strip()
+            date_series = raw_df[date_col].astype(str).str.strip()
+
+            # Условия разделения:
+            # 1. "Выведены": Дата вывода заполнена И КАМ == "Добавлено"
+            mask_released = (kam_series.str.lower() == "добавлено") & (date_series != "")
+            
+            # 2. "Добавить в файл": Все, где КАМ != "Добавлено"
+            mask_add_file = kam_series.str.lower() != "добавлено"
+            
+            # 3. "В работе": Все остальные случаи
+            mask_in_progress = ~mask_released & ~mask_add_file
+
+            df_in_progress = raw_df[mask_in_progress]
+            df_released = raw_df[mask_released]
+            df_add_file = raw_df[mask_add_file]
+
+            # Создаем 3 вложенные вкладки
+            sub_tab1, sub_tab2, sub_tab3 = st.tabs([
+                f"В работе ({len(df_in_progress)})", 
+                f"Выведены ({len(df_released)})", 
+                f"Добавить в файл ({len(df_add_file)})"
+            ])
+
+            with sub_tab1:
+                render_groups_table(df_in_progress)
+
+            with sub_tab2:
+                render_groups_table(df_released)
+
+            with sub_tab3:
+                render_groups_table(df_add_file)
+
         else:
             st.warning("Данные в таблице не найдены.")
+
     except Exception as e:
-        st.error(f"Ошибка при загрузке данных из Google Таблицы: {e}")
+        st.error(f"Ошибка при обработке данных: {e}")
