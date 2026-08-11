@@ -1588,245 +1588,8 @@ with main_tab3:
             render_task_card(task_row)
 
 # ==========================================
-# ФУНКЦИЯ ЗАГРУЗКИ ДАННЫХ ВЫВОДА ГРУПП
+# Вкладка 2 ОТКРЫТИЕ ГРУПП
 # ==========================================
-@st.cache_data(ttl=600)
-def load_groups_data():
-    sheet_id = "1LABW3U4TdX6cDjps_g_mBBsWRW8_Xx7W8LqBZB4CO2g"
-    sheet_name = quote("Вывод групп")
-    url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
-
-    df = pd.read_csv(url)
-
-    target_columns = [
-        "Группа 1",
-        "Группа 2",
-        "Группа 3",
-        "Влючено Материк",
-        "Включено Палас",
-        "Количество скю",
-        "Дата начала работ",
-        "Отправка КМ запроса на сайты-доноры",
-        "Дата получения сайтов доноров",
-        "Дата отправки на согласование",
-        "Дата согласования",
-        "Дата вывода на Материк (с товарами)",
-        "Выделено на сайт Палас",
-        "Добавлено в файл КАМ",
-    ]
-
-    existing_cols = [c for c in target_columns if c in df.columns]
-    return df[existing_cols].fillna("")
-
-# ==========================================
-# ВПОМОГАТЕЛЬНАЯ ФУНКЦИЯ ОТОБРАЖЕНИЯ ТАБЛИЦЫ
-# ==========================================
-def render_groups_table(df):
-    if df.empty:
-        st.info("Нет данных в данном разделе.")
-        return
-
-    headers_html = "".join([f"<th>{col}</th>" for col in df.columns])
-    
-    rows_html = []
-    for _, row in df.iterrows():
-        cells = "".join([f"<td>{val}</td>" for val in row])
-        rows_html.append(f"<tr>{cells}</tr>")
-    
-    table_html = f"""
-    <div class="groups-table-container">
-        <table class="groups-table">
-            <thead>
-                <tr>{headers_html}</tr>
-            </thead>
-            <tbody>
-                {"".join(rows_html)}
-            </tbody>
-        </table>
-    </div>
-    """
-    st.markdown(table_html, unsafe_allow_html=True)
-
-# ==========================================
-# ФУНКЦИЯ ЗАГРУЗКИ ДАННЫХ ВЫВОДА ГРУПП
-# ==========================================
-@st.cache_data(ttl=600)
-def load_groups_data():
-    sheet_id = "1LABW3U4TdX6cDjps_g_mBBsWRW8_Xx7W8LqBZB4CO2g"
-    
-    target_columns = [
-        "Группа 1",
-        "Группа 2",
-        "Группа 3",
-        "КАМ",
-        "Влючено Материк",
-        "Включено Палас",
-        "Количество скю",
-        "Дата начала работ",
-        "Отправка КМ запроса на сайты-доноры",
-        "Дата получения сайтов доноров",
-        "Дата отправки на согласование",
-        "Дата согласования",
-        "Дата вывода на Материк (с товарами)",
-        "Выделено на сайт Палас",
-        "Добавлено в файл КАМ",
-    ]
-
-    try:
-        gc = get_gspread_client()
-        sh = gc.open_by_key(sheet_id)
-        worksheet = sh.worksheet("Вывод групп")
-        vals = worksheet.get_all_values()
-
-        if len(vals) > 1:
-            headers = [str(h).strip() for h in vals[0]]
-            df = pd.DataFrame(vals[1:], columns=headers).astype(str)
-            df = df.replace({'nan': '', 'NaN': '', 'None': '', '<NA>': '', 'NaT': ''})
-
-            # Выбираем только имеющиеся колонки
-            existing_cols = [c for c in target_columns if c in df.columns]
-            df = df[existing_cols]
-
-            # Переименовываем столбцы аккуратно
-            rename_dict = {}
-            if "КАМ" in df.columns:
-                rename_dict["КАМ"] = "Менеджер"
-            
-            if rename_dict:
-                df = df.rename(columns=rename_dict)
-
-            return df
-
-        return pd.DataFrame()
-    except Exception as e:
-        st.error(f"Ошибка загрузки данных: {e}")
-        return pd.DataFrame()
-
-# ==========================================
-# РЕНДЕР ТАБЛИЦЫ
-# ==========================================
-def render_groups_table(df):
-    if df.empty:
-        st.info("Нет данных в данном разделе.")
-        return
-
-    headers_html = "".join([f"<th>{col}</th>" for col in df.columns])
-    
-    rows_html = []
-    for _, row in df.iterrows():
-        cells = "".join([f"<td>{val}</td>" for val in row])
-        rows_html.append(f"<tr>{cells}</tr>")
-    
-    table_html = f"""
-    <div class="groups-table-container">
-        <table class="groups-table">
-            <thead>
-                <tr>{headers_html}</tr>
-            </thead>
-            <tbody>
-                {"".join(rows_html)}
-            </tbody>
-        </table>
-    </div>
-    """
-    st.markdown(table_html, unsafe_allow_html=True)
-
-# ==========================================
-# 1. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ОЧИСТКИ И ИМПОРТА
-# ==========================================
-
-
-def clean_number_str(val):
-  """Форматирует числа, убирая .0, float-мусор и пустые значения"""
-  if pd.isna(val) or val is None:
-    return ""
-  s = str(val).strip()
-  if not s or s.lower() in ["nan", "none", "<na>", "nat"]:
-    return ""
-  if s.endswith(".0"):
-    return s[:-2]
-  try:
-    f = float(s)
-    if f.is_integer():
-      return str(int(f))
-    return str(f)
-  except ValueError:
-    return s
-
-
-@st.cache_data(ttl=300)
-def load_all_sheet_data():
-  """Загружает основные данные и справочники статусов из Google Sheets"""
-  sheet_id = "1LABW3U4TdX6cDjps_g_mBBsWRW8_Xx7W8LqBZB4CO2g"
-
-  try:
-    gc = get_gspread_client()
-    sh = gc.open_by_key(sheet_id)
-
-    # 1. Основной лист "Вывод групп"
-    ws_main = sh.worksheet("Вывод групп")
-    vals_main = ws_main.get_all_values()
-
-    if len(vals_main) <= 1:
-      df_main = pd.DataFrame()
-    else:
-      headers = [str(h).strip() for h in vals_main[0]]
-      df_main = pd.DataFrame(vals_main[1:], columns=headers).astype(str)
-
-    # 2. Справочник "Материк статус"
-    dict_materik = {}
-    try:
-      ws_mat = sh.worksheet("Материк статус")
-      vals_mat = ws_mat.get_all_values()
-      if len(vals_mat) > 1:
-        # Берём 1-й столбец как ключ (Группа), 2-й как Статус
-        for row in vals_mat[1:]:
-          if len(row) >= 2 and row[0].strip():
-            dict_materik[row[0].strip().lower()] = clean_number_str(row[1])
-    except Exception:
-      pass
-
-    # 3. Справочник "Палас статус"
-    dict_palas = {}
-    try:
-      ws_pal = sh.worksheet("Палас статус")
-      vals_pal = ws_pal.get_all_values()
-      if len(vals_pal) > 1:
-        # Берём 1-й столбец как ключ (Группа), 2-й как Статус
-        for row in vals_pal[1:]:
-          if len(row) >= 2 and row[0].strip():
-            dict_palas[row[0].strip().lower()] = clean_number_str(row[1])
-    except Exception:
-      pass
-
-    return df_main, dict_materik, dict_palas
-
-  except Exception as e:
-    st.error(f"Ошибка при загрузке Google Таблицы: {e}")
-    return pd.DataFrame(), {}, {}
-
-
-def save_groups_data(df_to_save):
-  """Сохраняет измененный DataFrame обратно в Google Таблицу"""
-  sheet_id = "1LABW3U4TdX6cDjps_g_mBBsWRW8_Xx7W8LqBZB4CO2g"
-  try:
-    gc = get_gspread_client()
-    sh = gc.open_by_key(sheet_id)
-    ws = sh.worksheet("Вывод групп")
-
-    # Преобразуем DataFrame в список списков для записи
-    values_to_write = [df_to_save.columns.tolist()] + df_to_save.fillna(
-        ""
-    ).values.tolist()
-
-    ws.clear()
-    ws.update("A1", values_to_write)
-    st.cache_data.clear()  # Сбрасываем кэш после записи
-    return True
-  except Exception as e:
-    st.error(f"Ошибка при сохранении в Google Таблицу: {e}")
-    return False
-
 
 # ==========================================
 # 1. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ И ОЧИСТКА
@@ -1901,6 +1664,35 @@ def load_all_sheet_data():
     return pd.DataFrame(), {}, {}
 
 
+@st.cache_data(ttl=300)
+def load_group_order_data():
+  """Загружает данные с листа 'Порядок расположения групп на сайте'"""
+  sheet_id = "1LABW3U4TdX6cDjps_g_mBBsWRW8_Xx7W8LqBZB4CO2g"
+  try:
+    gc = get_gspread_client()
+    sh = gc.open_by_key(sheet_id)
+    ws = sh.worksheet("Порядок расположения групп на сайте")
+    vals = ws.get_all_values()
+
+    if len(vals) <= 1:
+      return pd.DataFrame()
+
+    headers = [str(h).strip() for h in vals[0]]
+    df_order = pd.DataFrame(vals[1:], columns=headers).astype(str)
+
+    # Очистка от .0 и фантомных строк
+    for col in df_order.columns:
+      df_order[col] = df_order[col].apply(clean_number_str)
+
+    return df_order
+  except Exception as e:
+    st.error(
+        "Ошибка загрузки листа 'Порядок расположения групп на сайте':"
+        f" {e}"
+    )
+    return pd.DataFrame()
+
+
 def save_groups_data(df_to_save):
   """Сохраняет измененный DataFrame в Google Таблицу"""
   sheet_id = "1LABW3U4TdX6cDjps_g_mBBsWRW8_Xx7W8LqBZB4CO2g"
@@ -1923,7 +1715,7 @@ def save_groups_data(df_to_save):
 
 
 # ==========================================
-# 2. МОДАЛЬНОЕ ОКНО РЕДАКТИРОВАНИЯ/ДОБАВЛЕНИЯ
+# 2. МОДАЛЬНЫЕ ОКНА
 # ==========================================
 @st.dialog("✏️ Редактирование / Добавление группы", width="large")
 def group_editor_dialog(row_data, row_index, full_df, dict_materik, dict_palas):
@@ -1959,13 +1751,9 @@ def group_editor_dialog(row_data, row_index, full_df, dict_materik, dict_palas):
           "Менеджер", value=row_data.get("Менеджер", "") if not is_new else ""
       )
     with col2:
-      st.text_input(
-          "Влючено Материк (авто)", value=mat_val, disabled=True
-      )  # Автозаполнение
+      st.text_input("Влючено Материк (авто)", value=mat_val, disabled=True)
     with col3:
-      st.text_input(
-          "Включено Палас (авто)", value=pal_val, disabled=True
-      )  # Автозаполнение
+      st.text_input("Включено Палас (авто)", value=pal_val, disabled=True)
 
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -2073,6 +1861,16 @@ def group_editor_dialog(row_data, row_index, full_df, dict_materik, dict_palas):
         st.rerun()
 
 
+@st.dialog("📌 Порядок расположения групп на сайте", width="large")
+def show_group_order_dialog():
+  """Модальное окно с информацией о порядке расположения групп"""
+  df_order = load_group_order_data()
+  if not df_order.empty:
+    st.dataframe(df_order, use_container_width=True, height=500)
+  else:
+    st.info("Информация на листе отсутствует или не найдена.")
+
+
 # ==========================================
 # 3. ОСНОВНАЯ ВКЛАДКА "ОТКРЫТИЕ НОВЫХ ГРУПП"
 # ==========================================
@@ -2152,33 +1950,38 @@ with main_tab2:
     def render_groups_table_with_actions(df_subset, tab_key):
       if df_subset.empty:
         st.info("Нет данных в этом разделе.")
-        return
-
-      # Генерируем кнопки редактирования над/внутри таблицы
-      cols_to_show = df_subset.columns.tolist()
-      headers_html = "<th>Действие</th>" + "".join(
-          [f"<th>{c}</th>" for c in cols_to_show]
-      )
-
-      rows_html = []
-      for idx, row in df_subset.iterrows():
-        # Добавляем ссылку/кнопку вызова с уникальным ID
-        edit_btn_html = (
-            f"<td><a href='?edit_id={idx}' target='_self' style='text-decoration:"
-            " none;'>✏️ Edit</a></td>"
+      else:
+        cols_to_show = df_subset.columns.tolist()
+        headers_html = "<th>Действие</th>" + "".join(
+            [f"<th>{c}</th>" for c in cols_to_show]
         )
-        cells = "".join([f"<td>{row[c]}</td>" for c in cols_to_show])
-        rows_html.append(f"<tr>{edit_btn_html}{cells}</tr>")
 
-      table_html = f"""
-            <div class="groups-table-container">
-                <table class="groups-table">
-                    <thead><tr>{headers_html}</tr></thead>
-                    <tbody>{"".join(rows_html)}</tbody>
-                </table>
-            </div>
-            """
-      st.markdown(table_html, unsafe_allow_html=True)
+        rows_html = []
+        for idx, row in df_subset.iterrows():
+          edit_btn_html = (
+              f"<td><a href='?edit_id={idx}' target='_self'"
+              " style='text-decoration: none;'>✏️ Edit</a></td>"
+          )
+          cells = "".join([f"<td>{row[c]}</td>" for c in cols_to_show])
+          rows_html.append(f"<tr>{edit_btn_html}{cells}</tr>")
+
+        table_html = f"""
+                <div class="groups-table-container">
+                    <table class="groups-table">
+                        <thead><tr>{headers_html}</tr></thead>
+                        <tbody>{"".join(rows_html)}</tbody>
+                    </table>
+                </div>
+                """
+        st.markdown(table_html, unsafe_allow_html=True)
+
+      # Кнопка внизу под таблицей для вызова модального окна
+      st.markdown("---")
+      if st.button(
+          "📌 Посмотреть порядок расположения групп на сайте",
+          key=f"btn_order_{tab_key}",
+      ):
+        show_group_order_dialog()
 
     # Проверка, кликнули ли по кнопке ✏️ Edit
     query_params = st.query_params
@@ -2208,11 +2011,3 @@ with main_tab2:
 
   else:
     st.warning("Не удалось загрузить данные из таблицы.")
-@st.dialog("📌 Порядок расположения групп на сайте", width="large")
-def show_group_order_dialog():
-  """Модальное окно с информацией о порядке расположения групп"""
-  df_order = load_group_order_data()
-  if not df_order.empty:
-    st.dataframe(df_order, use_container_width=True, height=500)
-  else:
-    st.info("Информация на листе отсутствует или не найдена.")
