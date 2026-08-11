@@ -152,7 +152,7 @@ st.markdown(
         display: inline-flex;
         align-items: center;
     }
-    /* СТИЛИ ДЛЯ ВЫВОДА ГРУПП С ФИКСИРОВАННЫМИ СТОЛБЦАМИ И КОМПАКТНЫМ ВИДОМ */
+    /* СТИЛИ ДЛЯ ВЫВОДА ГРУПП С ПЕРЕНОСОМ ТЕКСТА И ФИКСИРОВАННЫМИ СТОЛБЦАМИ */
     .groups-table-container {
         max-height: 680px;
         overflow: auto;
@@ -170,10 +170,9 @@ st.markdown(
         top: 0;
         background: #f8f9fa;
         z-index: 10;
-        padding: 6px 4px;
+        padding: 6px 6px;
         white-space: normal !important;
         word-wrap: break-word;
-        max-width: 100px;
         text-align: center;
         vertical-align: middle;
         font-weight: 600;
@@ -182,23 +181,42 @@ st.markdown(
         line-height: 1.2;
     }
     .groups-table td {
-        padding: 4px 6px;
+        padding: 6px 8px;
         border-bottom: 1px solid #f0f2f5;
         border-right: 1px solid #f0f2f5;
-        white-space: nowrap;
+        /* Разрешаем перенос текста по строкам */
+        white-space: normal !important;
+        word-break: break-word;
         background-color: #ffffff;
         text-align: center;
+        vertical-align: middle;
     }
+
     /* Фиксирование первых трех столбцов (Группа 1, Группа 2, Группа 3) */
     .groups-table th:nth-child(1), .groups-table td:nth-child(1) {
-        position: sticky; left: 0; width: 130px; min-width: 130px; max-width: 130px;
+        position: sticky; 
+        left: 0; 
+        width: 140px; 
+        min-width: 140px; 
+        max-width: 140px;
     }
     .groups-table th:nth-child(2), .groups-table td:nth-child(2) {
-        position: sticky; left: 130px; width: 130px; min-width: 130px; max-width: 130px;
+        position: sticky; 
+        left: 140px; 
+        width: 140px; 
+        min-width: 140px; 
+        max-width: 140px;
     }
     .groups-table th:nth-child(3), .groups-table td:nth-child(3) {
-        position: sticky; left: 260px; width: 130px; min-width: 130px; max-width: 130px; border-right: 2px solid #d0d7de;
+        position: sticky; 
+        left: 280px; 
+        width: 150px; 
+        min-width: 150px; 
+        max-width: 150px; 
+        border-right: 2px solid #d0d7de;
     }
+
+    /* Фон и слой для зафиксированных столбцов */
     .groups-table td:nth-child(1), .groups-table td:nth-child(2), .groups-table td:nth-child(3) {
         background-color: #fcfcfd;
         text-align: left;
