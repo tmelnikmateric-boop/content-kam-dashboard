@@ -1654,51 +1654,53 @@ def render_groups_table(df):
 # ВКЛАДКА 2: ОТКРЫТИЕ НОВЫХ ГРУПП
 # ------------------------------------------
 with main_tab2:
-    st.subheader("📋 Вывод групп")
-    
-    try:
-        raw_df = load_groups_data()
-        
-        if not raw_df.empty:
-            # Очистка строк от лишних пробелов для точного фильтра
-            kam_col = "Добавлено в файл КАМ"
-            date_col = "Дата вывода на Материк (с товарами)"
-            
-            kam_series = raw_df[kam_col].astype(str).str.strip()
-            date_series = raw_df[date_col].astype(str).str.strip()
+  st.subheader("📋 Вывод групп")
 
-            # Условия разделения:
-            # 1. "Выведены": Дата вывода заполнена И КАМ == "Добавлено"
-            mask_released = (kam_series.str.lower() == "добавлено") & (date_series != "")
-            
-            # 2. "Добавить в файл": Все, где КАМ != "Добавлено"
-            mask_add_file = kam_series.str.lower() != "добавлено"
-            
-            # 3. "В работе": Все остальные случаи
-            mask_in_progress = ~mask_released & ~mask_add_file
+  try:
+    raw_df = load_groups_data()
 
-            df_in_progress = raw_df[mask_in_progress]
-            df_released = raw_df[mask_released]
-            df_add_file = raw_df[mask_add_file]
+    if not raw_df.empty:
+      kam_col = "Добавлено в файл КАМ"
+      date_col = "Дата вывода на Материк (с товарами)"
 
-            # Создаем 3 вложенные вкладки
-            sub_tab1, sub_tab2, sub_tab3 = st.tabs([
-                f"В работе ({len(df_in_progress)})", 
-                f"Выведены ({len(df_released)})", 
-                f"Добавить в файл ({len(df_add_file)})"
-            ])
+      kam_series = raw_df[kam_col].astype(str).str.strip()
+      date_series = raw_df[date_col].astype(str).str.strip()
 
-            with sub_tab1:
-                render_groups_table(df_in_progress)
+      # 1. "Выведены": Дата вывода заполнена И КАМ == "Добавлено"
+      mask_released = (kam_series.str.lower() == "добавлено") & (
+          date_series != ""
+      )
 
-            with sub_tab2:
-                render_groups_table(df_released)
+      # 2. "Добавить в файл": КАМ НЕ пустое И НЕ "Добавлено"
+      mask_add_file = (kam_series != "") & (
+          kam_series.str.lower() != "добавлено"
+      )
 
-            with sub_tab3:
-                render_groups_table(df_add_file)
+      # 3. "В работе": Все остальные случаи (включая когда КАМ пустое)
+      mask_in_progress = ~mask_released & ~mask_add_file
 
-        else:
-            st.warning("Данные в таблице не найдены.")
+      df_in_progress = raw_df[mask_in_progress]
+      df_released = raw_df[mask_released]
+      df_add_file = raw_df[mask_add_file]
 
-    except Exception as e:
-        st.error(f"Ошибка при обработке данных: {e}")
+      # Создаем 3 вложенные вкладки
+      sub_tab1, sub_tab2, sub_tab3 = st.tabs([
+          f"В работе ({len(df_in_progress)})",
+          f"Выведены ({len(df_released)})",
+          f"Добавить в файл ({len(df_add_file)})",
+      ])
+
+      with sub_tab1:
+        render_groups_table(df_in_progress)
+
+      with sub_tab2:
+        render_groups_table(df_released)
+
+      with sub_tab3:
+        render_groups_table(df_add_file)
+
+    else:
+      st.warning("Данные в таблице не найдены.")
+
+  except Exception as e:
+    st.error(f"Ошибка при обработке данных: {e}")
