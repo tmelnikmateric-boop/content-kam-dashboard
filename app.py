@@ -7,6 +7,7 @@ import pandas as pd
 import streamlit as st
 from urllib.parse import quote
 
+
 # ==========================================
 # 0. НАСТРОЙКА СТРАНИЦЫ И СТИЛЕЙ
 # ==========================================
@@ -1534,37 +1535,52 @@ with main_tab3:
           for _, task_row in done_tasks.iterrows():
             render_task_card(task_row)
 
-@st.cache_data(ttl=600)  # Кэширование на 10 минут
+# ==========================================
+# ФУНКЦИЯ ЗАГРУЗКИ ДАННЫХ ВЫВОДА ГРУПП
+# ==========================================
+@st.cache_data(ttl=600)
 def load_groups_data():
-  sheet_id = "1LABW3U4TdX6cDjps_g_mBBsWRW8_Xx7W8LqBZB4CO2g"
-  # Кодируем пробелы и кириллицу для безопасной передачи в URL
-  sheet_name = quote("Вывод групп")
+    sheet_id = "1LABW3U4TdX6cDjps_g_mBBsWRW8_Xx7W8LqBZB4CO2g"
+    sheet_name = quote("Вывод групп")
+    url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
 
-  url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
+    df = pd.read_csv(url)
 
-  # Чтение данных из Google Таблицы
-  df = pd.read_csv(url)
+    target_columns = [
+        "Группа 1",
+        "Группа 2",
+        "Группа 3",
+        "Влючено Материк",
+        "Включено Палас",
+        "Количество скю",
+        "Дата начала работ",
+        "Отправка КМ запроса на сайты-доноры",
+        "Дата получения сайтов доноров",
+        "Дата отправки на согласование",
+        "Дата согласования",
+        "Дата вывода на Материк (с товарами)",
+        "Выделено на сайт Палас",
+        "Добавлено в файл КАМ",
+    ]
 
-  # Список нужных столбцов
-  target_columns = [
-      "Группа 1",
-      "Группа 2",
-      "Группа 3",
-      "Влючено Материк",
-      "Включено Палас",
-      "Количество скю",
-      "Дата начала работ",
-      "Отправка КМ запроса на сайты-доноры",
-      "Дата получения сайтов доноров",
-      "Дата отправки на согласование",
-      "Дата согласования",
-      "Дата вывода на Материк (с товарами)",
-      "Выделено на сайт Палас",
-      "Добавлено в файл КАМ",
-  ]
+    existing_cols = [c for c in target_columns if c in df.columns]
+    return df[existing_cols].fillna("")
 
-  # Оставляем только существующие столбцы
-  existing_cols = [c for c in target_columns if c in df.columns]
-  df_filtered = df[existing_cols].fillna("")
-
-  return df_filtered
+# ------------------------------------------
+# ВКЛАДКА 2: ОТКРЫТИЕ НОВЫХ ГРУПП
+# ------------------------------------------
+with main_tab2:
+    st.subheader("📋 Вывод групп")
+    try:
+        groups_df = load_groups_data()
+        if not groups_df.empty:
+            st.dataframe(
+                groups_df,
+                use_container_width=True,
+                hide_index=True,
+                height=650,
+            )
+        else:
+            st.warning("Данные в таблице не найдены.")
+    except Exception as e:
+        st.error(f"Ошибка при загрузке данных из Google Таблицы: {e}")
