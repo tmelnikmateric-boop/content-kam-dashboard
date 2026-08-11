@@ -1474,7 +1474,18 @@ with main_tab1:
         else:
           cols_completed = [c for c in ['Имя файла', 'Группа 3', 'Количество товаров', 'Исполнитель', 'Дата начала работы', 'Дата завершения работы'] if c in completed_summary.columns]
           st.dataframe(completed_summary[cols_completed], use_container_width=True, hide_index=True)
-
+st.link_button(
+    "📥 Загруженные данные контента",
+    "https://docs.google.com/spreadsheets/d/1vCZQgzBPv8uahr8ckRI1f-TA_QS6Afz2B9NP_ZMj6ek/edit?gid=59376984#gid=59376984",
+    type="secondary",  # Вы можете заменить на "primary" для акцентного цвета
+    use_container_width=False,  # Поставьте True, если нужно растянуть на всю ширину
+)
+st.link_button(
+    "📥 Загруженные данные КАМ",
+    "https://docs.google.com/spreadsheets/d/1vCZQgzBPv8uahr8ckRI1f-TA_QS6Afz2B9NP_ZMj6ek/edit?gid=183144046#gid=183144046",
+    type="secondary",  # Вы можете заменить на "primary" для акцентного цвета
+    use_container_width=False,  # Поставьте True, если нужно растянуть на всю ширину
+)
 # ------------------------------------------
 # ВКЛАДКА 3: ЗАДАЧИ
 # ------------------------------------------
