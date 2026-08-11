@@ -1668,57 +1668,53 @@ def render_groups_table(df):
     """
     st.markdown(table_html, unsafe_allow_html=True)
 
-# ------------------------------------------
-# ВКЛАДКА 2: ОТКРЫТИЕ НОВЫХ ГРУПП
-# ------------------------------------------
-with main_tab2:
-  st.subheader("📋 Вывод групп")
+# ==========================================
+# ФУНКЦИЯ ЗАГРУЗКИ ДАННЫХ ВЫВОДА ГРУПП
+# ==========================================
+@st.cache_data(ttl=600)
+def load_groups_data():
+    sheet_id = "1LABW3U4TdX6cDjps_g_mBBsWRW8_Xx7W8LqBZB4CO2g"
+    
+    # Добавляем "КАМ" сразу после "Группа 3"
+    target_columns = [
+        "Группа 1",
+        "Группа 2",
+        "Группа 3",
+        "КАМ",
+        "Влючено Материк",
+        "Включено Палас",
+        "Количество скю",
+        "Дата начала работ",
+        "Отправка КМ запроса на сайты-доноры",
+        "Дата получения сайтов доноров",
+        "Дата отправки на согласование",
+        "Дата согласования",
+        "Дата вывода на Материк (с товарами)",
+        "Выделено на сайт Палас",
+        "Добавлено в файл КАМ",
+    ]
 
-  try:
-    raw_df = load_groups_data()
+    try:
+        gc = get_gspread_client()
+        sh = gc.open_by_key(sheet_id)
+        worksheet = sh.worksheet("Вывод групп")
+        vals = worksheet.get_all_values()
 
-    if not raw_df.empty:
-      kam_col = "Добавлено в файл КАМ"
-      date_col = "Дата вывода на Материк (с товарами)"
+        if len(vals) > 1:
+            headers = [str(h).strip() for h in vals[0]]
+            df = pd.DataFrame(vals[1:], columns=headers).astype(str)
+            df = df.replace({'nan': '', 'NaN': '', 'None': '', '<NA>': '', 'NaT': ''})
 
-      kam_series = raw_df[kam_col].astype(str).str.strip()
-      date_series = raw_df[date_col].astype(str).str.strip()
+            existing_cols = [c for c in target_columns if c in df.columns]
+            df = df[existing_cols]
 
-      # 1. "Выведены": Дата вывода заполнена И КАМ == "Добавлено"
-      mask_released = (kam_series.str.lower() == "добавлено") & (
-          date_series != ""
-      )
+            # Переименовываем "КАМ" в "Менеджер"
+            if "КАМ" in df.columns:
+                df = df.rename(columns={"КАМ": "Менеджер"})
 
-      # 2. "Добавить в файл": КАМ НЕ пустое И НЕ "Добавлено"
-      mask_add_file = (kam_series != "") & (
-          kam_series.str.lower() != "добавлено"
-      )
+            return df
 
-      # 3. "В работе": Все остальные случаи (включая когда КАМ пустое)
-      mask_in_progress = ~mask_released & ~mask_add_file
-
-      df_in_progress = raw_df[mask_in_progress]
-      df_released = raw_df[mask_released]
-      df_add_file = raw_df[mask_add_file]
-
-      # Создаем 3 вложенные вкладки
-      sub_tab1, sub_tab2, sub_tab3 = st.tabs([
-          f"В работе ({len(df_in_progress)})",
-          f"Выведены ({len(df_released)})",
-          f"Добавить в файл ({len(df_add_file)})",
-      ])
-
-      with sub_tab1:
-        render_groups_table(df_in_progress)
-
-      with sub_tab2:
-        render_groups_table(df_released)
-
-      with sub_tab3:
-        render_groups_table(df_add_file)
-
-    else:
-      st.warning("Данные в таблице не найдены.")
-
-  except Exception as e:
-    st.error(f"Ошибка при обработке данных: {e}")
+        return pd.DataFrame()
+    except Exception as e:
+        st.error(f"Ошибка загрузки через gspread: {e}")
+        return pd.DataFrame()
