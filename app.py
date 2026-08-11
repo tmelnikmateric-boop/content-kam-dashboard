@@ -2208,3 +2208,11 @@ with main_tab2:
 
   else:
     st.warning("Не удалось загрузить данные из таблицы.")
+@st.dialog("📌 Порядок расположения групп на сайте", width="large")
+def show_group_order_dialog():
+  """Модальное окно с информацией о порядке расположения групп"""
+  df_order = load_group_order_data()
+  if not df_order.empty:
+    st.dataframe(df_order, use_container_width=True, height=500)
+  else:
+    st.info("Информация на листе отсутствует или не найдена.")
