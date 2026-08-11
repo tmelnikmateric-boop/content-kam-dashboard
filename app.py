@@ -1752,53 +1752,144 @@ def render_groups_table(df):
     """
     st.markdown(table_html, unsafe_allow_html=True)
 
-# ------------------------------------------
-# ВКЛАДКА 2: ОТКРЫТИЕ НОВЫХ ГРУПП
-# ------------------------------------------
+# ==========================================
+# 1. ФУНКЦИЯ ЗАГРУЗКИ ДАННЫХ ИЗ GOOGLE SHEETS
+# ==========================================
+@st.cache_data(ttl=600)
+def load_groups_data():
+  sheet_id = "1LABW3U4TdX6cDjps_g_mBBsWRW8_Xx7W8LqBZB4CO2g"
+
+  # Явно запрашиваем список всех нужных колонок, включая "Менеджер"
+  target_columns = [
+      "Группа 1",
+      "Группа 2",
+      "Группа 3",
+      "Менеджер",
+      "Влючено Материк",
+      "Включено Палас",
+      "Количество скю",
+      "Дата начала работ",
+      "Отправка КМ запроса на сайты-доноры",
+      "Дата получения сайтов доноров",
+      "Дата отправки на согласование",
+      "Дата согласования",
+      "Дата вывода на Материк (с товарами)",
+      "Выделено на сайт Палас",
+      "Добавлено в файл КАМ",
+  ]
+
+  try:
+    gc = get_gspread_client()
+    sh = gc.open_by_key(sheet_id)
+    worksheet = sh.worksheet("Вывод групп")
+    vals = worksheet.get_all_values()
+
+    if len(vals) > 1:
+      headers = [str(h).strip() for h in vals[0]]
+      df = pd.DataFrame(vals[1:], columns=headers).astype(str)
+      df = df.replace(
+          {"nan": "", "NaN": "", "None": "", "<NA>": "", "NaT": ""}
+      )
+
+      # Оставляем только нужные колонки в строго заданном порядке
+      existing_cols = [c for c in target_columns if c in df.columns]
+      return df[existing_cols]
+
+    return pd.DataFrame(columns=target_columns)
+  except Exception as e:
+    st.error(f"Ошибка загрузки данных из Google Таблицы: {e}")
+    return pd.DataFrame()
+
+
+# ==========================================
+# 2. ФУНКЦИЯ ОТОБРАЖЕНИЯ HTML-ТАБЛИЦЫ
+# ==========================================
+def render_groups_table(df):
+  if df.empty:
+    st.info("Нет данных в данном разделе.")
+    return
+
+  headers_html = "".join([f"<th>{col}</th>" for col in df.columns])
+
+  rows_html = []
+  for _, row in df.iterrows():
+    cells = "".join([f"<td>{val}</td>" for val in row])
+    rows_html.append(f"<tr>{cells}</tr>")
+
+  table_html = f"""
+    <div class="groups-table-container">
+        <table class="groups-table">
+            <thead>
+                <tr>{headers_html}</tr>
+            </thead>
+            <tbody>
+                {"".join(rows_html)}
+            </tbody>
+        </table>
+    </div>
+    """
+  st.markdown(table_html, unsafe_allow_html=True)
+
+
+# ==========================================
+# 3. ВКЛАДКА "ОТКРЫТИЕ НОВЫХ ГРУПП" (MAIN TAB 2)
+# ==========================================
 with main_tab2:
-    st.subheader("📋 Вывод групп")
-    
-    try:
-        raw_df = load_groups_data()
-        
-        if not raw_df.empty:
-            kam_col = "Добавлено в файл КАМ"
-            date_col = "Дата вывода на Материк (с товарами)"
-            
-            # Проверяем наличие колонок для фильтрации
-            kam_series = raw_df[kam_col].astype(str).str.strip() if kam_col in raw_df.columns else pd.Series([""] * len(raw_df))
-            date_series = raw_df[date_col].astype(str).str.strip() if date_col in raw_df.columns else pd.Series([""] * len(raw_df))
+  st.subheader("📋 Вывод групп")
 
-            # 1. "Выведены": Дата вывода заполнена И КАМ == "Добавлено"
-            mask_released = (kam_series.str.lower() == "добавлено") & (date_series != "")
-            
-            # 2. "Добавить в файл": КАМ НЕ пустое И НЕ "Добавлено"
-            mask_add_file = (kam_series != "") & (kam_series.str.lower() != "добавлено")
-            
-            # 3. "В работе": Все остальные случаи (включая если КАМ пустое)
-            mask_in_progress = ~mask_released & ~mask_add_file
+  raw_df = load_groups_data()
 
-            df_in_progress = raw_df[mask_in_progress]
-            df_released = raw_df[mask_released]
-            df_add_file = raw_df[mask_add_file]
+  if not raw_df.empty:
+    kam_col = "Добавлено в файл КАМ"
+    date_col = "Дата вывода на Материк (с товарами)"
 
-            sub_tab1, sub_tab2, sub_tab3 = st.tabs([
-                f"В работе ({len(df_in_progress)})", 
-                f"Выведены ({len(df_released)})", 
-                f"Добавить в файл ({len(df_add_file)})"
-            ])
+    # Формируем серии данных для фильтрации
+    kam_series = (
+        raw_df[kam_col].astype(str).str.strip()
+        if kam_col in raw_df.columns
+        else pd.Series([""] * len(raw_df))
+    )
+    date_series = (
+        raw_df[date_col].astype(str).str.strip()
+        if date_col in raw_df.columns
+        else pd.Series([""] * len(raw_df))
+    )
 
-            with sub_tab1:
-                render_groups_table(df_in_progress)
+    # ------------------------------------------
+    # УСЛОВИЯ РАСПРЕДЕЛЕНИЯ ПО ВКЛАДКАМ:
+    # ------------------------------------------
+    # 1. "Выведены": Дата вывода заполнена И КАМ равен "Добавлено"
+    mask_released = (kam_series.str.lower() == "добавлено") & (
+        date_series != ""
+    )
 
-            with sub_tab2:
-                render_groups_table(df_released)
+    # 2. "Добавить в файл": КАМ НЕ пустой И НЕ равен "Добавлено"
+    mask_add_file = (kam_series != "") & (
+        kam_series.str.lower() != "добавлено"
+    )
 
-            with sub_tab3:
-                render_groups_table(df_add_file)
+    # 3. "В работе": Все остальные варианты (включая если КАМ пустой)
+    mask_in_progress = ~mask_released & ~mask_add_file
 
-        else:
-            st.warning("Данные в таблице не найдены или пустые.")
+    df_in_progress = raw_df[mask_in_progress]
+    df_released = raw_df[mask_released]
+    df_add_file = raw_df[mask_add_file]
 
-    except Exception as e:
-        st.error(f"Ошибка при обработке интерфейса: {e}")
+    # Создаем 3 вложенные подвкладки
+    sub_tab1, sub_tab2, sub_tab3 = st.tabs([
+        f"В работе ({len(df_in_progress)})",
+        f"Выведены ({len(df_released)})",
+        f"Добавить в файл ({len(df_add_file)})",
+    ])
+
+    with sub_tab1:
+      render_groups_table(df_in_progress)
+
+    with sub_tab2:
+      render_groups_table(df_released)
+
+    with sub_tab3:
+      render_groups_table(df_add_file)
+
+  else:
+    st.warning("Не удалось загрузить данные из таблицы.")
