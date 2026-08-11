@@ -225,6 +225,15 @@ st.markdown(
     .groups-table th:nth-child(1), .groups-table th:nth-child(2), .groups-table th:nth-child(3) {
         z-index: 15;
     }
+    /* Настройки стилей для st.data_editor */
+    div[data-testid="stDataEditor"] {
+        width: 100%;
+    }
+    div[data-testid="stDataEditor"] th {
+        white-space: normal !important;
+        word-wrap: break-word !important;
+        text-align: center !important;
+    }
     </style>
 """,
     unsafe_allow_html=True,
@@ -1753,13 +1762,110 @@ def render_groups_table(df):
     st.markdown(table_html, unsafe_allow_html=True)
 
 # ==========================================
-# 1. ФУНКЦИЯ ЗАГРУЗКИ ДАННЫХ ИЗ GOOGLE SHEETS
+# 1. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ОЧИСТКИ И ИМПОРТА
 # ==========================================
-@st.cache_data(ttl=600)
-def load_groups_data():
+
+
+def clean_number_str(val):
+  """Форматирует числа, убирая .0, float-мусор и пустые значения"""
+  if pd.isna(val) or val is None:
+    return ""
+  s = str(val).strip()
+  if not s or s.lower() in ["nan", "none", "<na>", "nat"]:
+    return ""
+  if s.endswith(".0"):
+    return s[:-2]
+  try:
+    f = float(s)
+    if f.is_integer():
+      return str(int(f))
+    return str(f)
+  except ValueError:
+    return s
+
+
+@st.cache_data(ttl=300)
+def load_all_sheet_data():
+  """Загружает основные данные и справочники статусов из Google Sheets"""
   sheet_id = "1LABW3U4TdX6cDjps_g_mBBsWRW8_Xx7W8LqBZB4CO2g"
 
-  # Явно запрашиваем список всех нужных колонок, включая "Менеджер"
+  try:
+    gc = get_gspread_client()
+    sh = gc.open_by_key(sheet_id)
+
+    # 1. Основной лист "Вывод групп"
+    ws_main = sh.worksheet("Вывод групп")
+    vals_main = ws_main.get_all_values()
+
+    if len(vals_main) <= 1:
+      df_main = pd.DataFrame()
+    else:
+      headers = [str(h).strip() for h in vals_main[0]]
+      df_main = pd.DataFrame(vals_main[1:], columns=headers).astype(str)
+
+    # 2. Справочник "Материк статус"
+    dict_materik = {}
+    try:
+      ws_mat = sh.worksheet("Материк статус")
+      vals_mat = ws_mat.get_all_values()
+      if len(vals_mat) > 1:
+        # Берём 1-й столбец как ключ (Группа), 2-й как Статус
+        for row in vals_mat[1:]:
+          if len(row) >= 2 and row[0].strip():
+            dict_materik[row[0].strip().lower()] = clean_number_str(row[1])
+    except Exception:
+      pass
+
+    # 3. Справочник "Палас статус"
+    dict_palas = {}
+    try:
+      ws_pal = sh.worksheet("Палас статус")
+      vals_pal = ws_pal.get_all_values()
+      if len(vals_pal) > 1:
+        # Берём 1-й столбец как ключ (Группа), 2-й как Статус
+        for row in vals_pal[1:]:
+          if len(row) >= 2 and row[0].strip():
+            dict_palas[row[0].strip().lower()] = clean_number_str(row[1])
+    except Exception:
+      pass
+
+    return df_main, dict_materik, dict_palas
+
+  except Exception as e:
+    st.error(f"Ошибка при загрузке Google Таблицы: {e}")
+    return pd.DataFrame(), {}, {}
+
+
+def save_groups_data(df_to_save):
+  """Сохраняет измененный DataFrame обратно в Google Таблицу"""
+  sheet_id = "1LABW3U4TdX6cDjps_g_mBBsWRW8_Xx7W8LqBZB4CO2g"
+  try:
+    gc = get_gspread_client()
+    sh = gc.open_by_key(sheet_id)
+    ws = sh.worksheet("Вывод групп")
+
+    # Преобразуем DataFrame в список списков для записи
+    values_to_write = [df_to_save.columns.tolist()] + df_to_save.fillna(
+        ""
+    ).values.tolist()
+
+    ws.clear()
+    ws.update("A1", values_to_write)
+    st.cache_data.clear()  # Сбрасываем кэш после записи
+    return True
+  except Exception as e:
+    st.error(f"Ошибка при сохранении в Google Таблицу: {e}")
+    return False
+
+
+# ==========================================
+# 2. ОСНОВНАЯ ВКЛАДКА "ОТКРЫТИЕ НОВЫХ ГРУПП"
+# ==========================================
+with main_tab2:
+  st.subheader("📋 Вывод групп")
+
+  df_raw, dict_materik, dict_palas = load_all_sheet_data()
+
   target_columns = [
       "Группа 1",
       "Группа 2",
@@ -1778,118 +1884,96 @@ def load_groups_data():
       "Добавлено в файл КАМ",
   ]
 
-  try:
-    gc = get_gspread_client()
-    sh = gc.open_by_key(sheet_id)
-    worksheet = sh.worksheet("Вывод групп")
-    vals = worksheet.get_all_values()
+  if not df_raw.empty:
+    # Гарантируем наличие всех целевых колонок
+    for col in target_columns:
+      if col not in df_raw.columns:
+        df_raw[col] = ""
 
-    if len(vals) > 1:
-      headers = [str(h).strip() for h in vals[0]]
-      df = pd.DataFrame(vals[1:], columns=headers).astype(str)
-      df = df.replace(
-          {"nan": "", "NaN": "", "None": "", "<NA>": "", "NaT": ""}
-      )
+    df_proc = df_raw[target_columns].copy()
 
-      # Оставляем только нужные колонки в строго заданном порядке
-      existing_cols = [c for c in target_columns if c in df.columns]
-      return df[existing_cols]
+    # Чистим все числа от .0 во всей таблице
+    for col in df_proc.columns:
+      df_proc[col] = df_proc[col].apply(clean_number_str)
 
-    return pd.DataFrame(columns=target_columns)
-  except Exception as e:
-    st.error(f"Ошибка загрузки данных из Google Таблицы: {e}")
-    return pd.DataFrame()
+    # Автозаполнение ВПР (Влючено Материк / Включено Палас) по полю "Группа 3"
+    def apply_vlookup(row):
+      grp = str(row["Группа 3"]).strip().lower()
+      if grp:
+        if grp in dict_materik:
+          row["Влючено Материк"] = dict_materik[grp]
+        if grp in dict_palas:
+          row["Включено Палас"] = dict_palas[grp]
+      return row
 
+    df_proc = df_proc.apply(apply_vlookup, axis=1)
 
-# ==========================================
-# 2. ФУНКЦИЯ ОТОБРАЖЕНИЯ HTML-ТАБЛИЦЫ
-# ==========================================
-def render_groups_table(df):
-  if df.empty:
-    st.info("Нет данных в данном разделе.")
-    return
-
-  headers_html = "".join([f"<th>{col}</th>" for col in df.columns])
-
-  rows_html = []
-  for _, row in df.iterrows():
-    cells = "".join([f"<td>{val}</td>" for val in row])
-    rows_html.append(f"<tr>{cells}</tr>")
-
-  table_html = f"""
-    <div class="groups-table-container">
-        <table class="groups-table">
-            <thead>
-                <tr>{headers_html}</tr>
-            </thead>
-            <tbody>
-                {"".join(rows_html)}
-            </tbody>
-        </table>
-    </div>
-    """
-  st.markdown(table_html, unsafe_allow_html=True)
-
-
-# ==========================================
-# 3. ВКЛАДКА "ОТКРЫТИЕ НОВЫХ ГРУПП" (MAIN TAB 2)
-# ==========================================
-with main_tab2:
-  st.subheader("📋 Вывод групп")
-
-  raw_df = load_groups_data()
-
-  if not raw_df.empty:
+    # Условия фильтрации по вложенным вкладкам
     kam_col = "Добавлено в файл КАМ"
     date_col = "Дата вывода на Материк (с товарами)"
 
-    # Формируем серии данных для фильтрации
-    kam_series = (
-        raw_df[kam_col].astype(str).str.strip()
-        if kam_col in raw_df.columns
-        else pd.Series([""] * len(raw_df))
-    )
-    date_series = (
-        raw_df[date_col].astype(str).str.strip()
-        if date_col in raw_df.columns
-        else pd.Series([""] * len(raw_df))
-    )
+    kam_series = df_proc[kam_col].astype(str).str.strip()
+    date_series = df_proc[date_col].astype(str).str.strip()
 
-    # ------------------------------------------
-    # УСЛОВИЯ РАСПРЕДЕЛЕНИЯ ПО ВКЛАДКАМ:
-    # ------------------------------------------
-    # 1. "Выведены": Дата вывода заполнена И КАМ равен "Добавлено"
     mask_released = (kam_series.str.lower() == "добавлено") & (
         date_series != ""
     )
-
-    # 2. "Добавить в файл": КАМ НЕ пустой И НЕ равен "Добавлено"
-    mask_add_file = (kam_series != "") & (
-        kam_series.str.lower() != "добавлено"
-    )
-
-    # 3. "В работе": Все остальные варианты (включая если КАМ пустой)
+    mask_add_file = (kam_series != "") & (kam_series.str.lower() != "добавлено")
     mask_in_progress = ~mask_released & ~mask_add_file
 
-    df_in_progress = raw_df[mask_in_progress]
-    df_released = raw_df[mask_released]
-    df_add_file = raw_df[mask_add_file]
+    df_in_progress = df_proc[mask_in_progress]
+    df_released = df_proc[mask_released]
+    df_add_file = df_proc[mask_add_file]
 
-    # Создаем 3 вложенные подвкладки
     sub_tab1, sub_tab2, sub_tab3 = st.tabs([
         f"В работе ({len(df_in_progress)})",
         f"Выведены ({len(df_released)})",
         f"Добавить в файл ({len(df_add_file)})",
     ])
 
+    # Универсальная функция редактирования таблицы для каждой подвкладки
+    def display_editable_tab(sub_df, tab_key):
+      st.caption(
+          "💡 Вы можете редактировать ячейки прямо в таблице или добавлять"
+          " новые строки в самом низу таблицы."
+      )
+
+      edited_df = st.data_editor(
+          sub_df,
+          key=f"editor_{tab_key}",
+          num_rows="dynamic",  # Разрешает добавление новых строк внизу
+          use_container_width=True,
+          height=500,
+          disabled=[
+              "Влючено Материк",
+              "Включено Палас",
+          ],  # Запрещаем ручное изменение колонок, заполняемых по ВПР
+      )
+
+      if st.button("💾 Сохранить изменения в Google Таблицу", key=f"btn_{tab_key}"):
+        # Объединяем измененный срез обратно с полным DataFrame
+        updated_full_df = df_proc.copy()
+        updated_full_df.update(edited_df)
+
+        # Если были добавлены новые строки через editor
+        new_rows = edited_df[~edited_df.index.isin(df_proc.index)]
+        if not new_rows.empty:
+          updated_full_df = pd.concat(
+              [updated_full_df, new_rows], ignore_index=True
+          )
+
+        if save_groups_data(updated_full_df):
+          st.success("Данные успешно сохранены в Google Таблицу!")
+          st.rerun()
+
     with sub_tab1:
-      render_groups_table(df_in_progress)
+      display_editable_tab(df_in_progress, "in_progress")
 
     with sub_tab2:
-      render_groups_table(df_released)
+      display_editable_tab(df_released, "released")
 
     with sub_tab3:
-      render_groups_table(df_add_file)
+      display_editable_tab(df_add_file, "add_file")
 
   else:
-    st.warning("Не удалось загрузить данные из таблицы.")
+    st.warning("Данные не найдены.")
