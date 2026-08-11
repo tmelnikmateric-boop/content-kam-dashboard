@@ -23,14 +23,25 @@ st.markdown(
         margin-bottom: 25px;
     }
     
+    /* Стили для радиобнопок («Отдел контента» / «Коммерческий отдел»): мелкий шрифт, выравнивание слева */
     div[data-testid="stRadio"] > label {
         display: none;
     }
     div[data-testid="stRadio"] > div {
-        justify-content: center;
-        gap: 20px;
+        justify-content: flex-start !important;
+        gap: 15px;
     }
     div[data-testid="stRadio"] label p {
+        font-size: 0.95rem !important;
+        font-weight: 500 !important;
+    }
+
+    /* Стили для 3 основных вкладок: крупный шрифт (как у отдела), выравнивание по центру */
+    div[data-testid="stTabs"] [data-baseweb="tab-list"] {
+        justify-content: center !important;
+        gap: 30px;
+    }
+    div[data-testid="stTabs"] [data-baseweb="tab"] p {
         font-size: 1.25rem !important;
         font-weight: 600 !important;
     }
