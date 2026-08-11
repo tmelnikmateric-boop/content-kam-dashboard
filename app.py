@@ -154,7 +154,7 @@ st.markdown(
     }
     /* СТИЛИ ДЛЯ ВЫВОДА ГРУПП С ПЕРЕНОСОМ ТЕКСТА И ФИКСИРОВАННЫМИ СТОЛБЦАМИ */
     .groups-table-container {
-        max-height: 680px;
+        max-height: 650px;
         overflow: auto;
         border: 1px solid #e6e8eb;
         border-radius: 8px;
@@ -184,7 +184,6 @@ st.markdown(
         padding: 6px 8px;
         border-bottom: 1px solid #f0f2f5;
         border-right: 1px solid #f0f2f5;
-        /* Разрешаем перенос текста по строкам */
         white-space: normal !important;
         word-break: break-word;
         background-color: #ffffff;
@@ -193,46 +192,23 @@ st.markdown(
     }
 
     /* Фиксирование первых трех столбцов (Группа 1, Группа 2, Группа 3) */
-    .groups-table th:nth-child(1), .groups-table td:nth-child(1) {
-        position: sticky; 
-        left: 0; 
-        width: 140px; 
-        min-width: 140px; 
-        max-width: 140px;
-    }
     .groups-table th:nth-child(2), .groups-table td:nth-child(2) {
-        position: sticky; 
-        left: 140px; 
-        width: 140px; 
-        min-width: 140px; 
-        max-width: 140px;
+        position: sticky; left: 0; width: 130px; min-width: 130px; max-width: 130px;
     }
     .groups-table th:nth-child(3), .groups-table td:nth-child(3) {
-        position: sticky; 
-        left: 280px; 
-        width: 150px; 
-        min-width: 150px; 
-        max-width: 150px; 
-        border-right: 2px solid #d0d7de;
+        position: sticky; left: 130px; width: 130px; min-width: 130px; max-width: 130px;
+    }
+    .groups-table th:nth-child(4), .groups-table td:nth-child(4) {
+        position: sticky; left: 260px; width: 140px; min-width: 140px; max-width: 140px; border-right: 2px solid #d0d7de;
     }
 
-    /* Фон и слой для зафиксированных столбцов */
-    .groups-table td:nth-child(1), .groups-table td:nth-child(2), .groups-table td:nth-child(3) {
+    .groups-table td:nth-child(2), .groups-table td:nth-child(3), .groups-table td:nth-child(4) {
         background-color: #fcfcfd;
         text-align: left;
         z-index: 5;
     }
-    .groups-table th:nth-child(1), .groups-table th:nth-child(2), .groups-table th:nth-child(3) {
+    .groups-table th:nth-child(2), .groups-table th:nth-child(3), .groups-table th:nth-child(4) {
         z-index: 15;
-    }
-    /* Настройки стилей для st.data_editor */
-    div[data-testid="stDataEditor"] {
-        width: 100%;
-    }
-    div[data-testid="stDataEditor"] th {
-        white-space: normal !important;
-        word-wrap: break-word !important;
-        text-align: center !important;
     }
     </style>
 """,
@@ -1859,7 +1835,252 @@ def save_groups_data(df_to_save):
 
 
 # ==========================================
-# 2. ОСНОВНАЯ ВКЛАДКА "ОТКРЫТИЕ НОВЫХ ГРУПП"
+# 1. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ И ОЧИСТКА
+# ==========================================
+
+
+def clean_number_str(val):
+  """Убирает .0 и форматирует числа"""
+  if pd.isna(val) or val is None:
+    return ""
+  s = str(val).strip()
+  if not s or s.lower() in ["nan", "none", "<na>", "nat"]:
+    return ""
+  if s.endswith(".0"):
+    return s[:-2]
+  try:
+    f = float(s)
+    if f.is_integer():
+      return str(int(f))
+    return str(f)
+  except ValueError:
+    return s
+
+
+@st.cache_data(ttl=300)
+def load_all_sheet_data():
+  """Загружает основные данные и справочники VLOOKUP"""
+  sheet_id = "1LABW3U4TdX6cDjps_g_mBBsWRW8_Xx7W8LqBZB4CO2g"
+
+  try:
+    gc = get_gspread_client()
+    sh = gc.open_by_key(sheet_id)
+
+    # 1. Основной лист "Вывод групп"
+    ws_main = sh.worksheet("Вывод групп")
+    vals_main = ws_main.get_all_values()
+
+    if len(vals_main) <= 1:
+      df_main = pd.DataFrame()
+    else:
+      headers = [str(h).strip() for h in vals_main[0]]
+      df_main = pd.DataFrame(vals_main[1:], columns=headers).astype(str)
+
+    # 2. Справочник "Материк статус"
+    dict_materik = {}
+    try:
+      ws_mat = sh.worksheet("Материк статус")
+      vals_mat = ws_mat.get_all_values()
+      if len(vals_mat) > 1:
+        for row in vals_mat[1:]:
+          if len(row) >= 2 and row[0].strip():
+            dict_materik[row[0].strip().lower()] = clean_number_str(row[1])
+    except Exception:
+      pass
+
+    # 3. Справочник "Палас статус"
+    dict_palas = {}
+    try:
+      ws_pal = sh.worksheet("Палас статус")
+      vals_pal = ws_pal.get_all_values()
+      if len(vals_pal) > 1:
+        for row in vals_pal[1:]:
+          if len(row) >= 2 and row[0].strip():
+            dict_palas[row[0].strip().lower()] = clean_number_str(row[1])
+    except Exception:
+      pass
+
+    return df_main, dict_materik, dict_palas
+
+  except Exception as e:
+    st.error(f"Ошибка загрузки данных из Google Таблицы: {e}")
+    return pd.DataFrame(), {}, {}
+
+
+def save_groups_data(df_to_save):
+  """Сохраняет измененный DataFrame в Google Таблицу"""
+  sheet_id = "1LABW3U4TdX6cDjps_g_mBBsWRW8_Xx7W8LqBZB4CO2g"
+  try:
+    gc = get_gspread_client()
+    sh = gc.open_by_key(sheet_id)
+    ws = sh.worksheet("Вывод групп")
+
+    values_to_write = [df_to_save.columns.tolist()] + df_to_save.fillna(
+        ""
+    ).values.tolist()
+
+    ws.clear()
+    ws.update("A1", values_to_write)
+    st.cache_data.clear()
+    return True
+  except Exception as e:
+    st.error(f"Ошибка сохранения: {e}")
+    return False
+
+
+# ==========================================
+# 2. МОДАЛЬНОЕ ОКНО РЕДАКТИРОВАНИЯ/ДОБАВЛЕНИЯ
+# ==========================================
+@st.dialog("✏️ Редактирование / Добавление группы", width="large")
+def group_editor_dialog(row_data, row_index, full_df, dict_materik, dict_palas):
+  is_new = row_index is None
+
+  with st.form("group_edit_form"):
+    col1, col2, col3 = st.columns(3)
+    with col1:
+      g1 = st.text_input(
+          "Группа 1", value=row_data.get("Группа 1", "") if not is_new else ""
+      )
+    with col2:
+      g2 = st.text_input(
+          "Группа 2", value=row_data.get("Группа 2", "") if not is_new else ""
+      )
+    with col3:
+      g3 = st.text_input(
+          "Группа 3", value=row_data.get("Группа 3", "") if not is_new else ""
+      )
+
+    # Авторасчет статусов ВПР при указании Группы 3
+    grp_key = g3.strip().lower()
+    mat_val = dict_materik.get(
+        grp_key, row_data.get("Влючено Материк", "") if not is_new else ""
+    )
+    pal_val = dict_palas.get(
+        grp_key, row_data.get("Включено Палас", "") if not is_new else ""
+    )
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+      manager = st.text_input(
+          "Менеджер", value=row_data.get("Менеджер", "") if not is_new else ""
+      )
+    with col2:
+      st.text_input(
+          "Влючено Материк (авто)", value=mat_val, disabled=True
+      )  # Автозаполнение
+    with col3:
+      st.text_input(
+          "Включено Палас (авто)", value=pal_val, disabled=True
+      )  # Автозаполнение
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+      sku = st.text_input(
+          "Количество скю",
+          value=row_data.get("Количество скю", "") if not is_new else "",
+      )
+    with col2:
+      d_start = st.text_input(
+          "Дата начала работ",
+          value=row_data.get("Дата начала работ", "") if not is_new else "",
+      )
+    with col3:
+      d_req = st.text_input(
+          "Отправка КМ запроса на сайты-доноры",
+          value=(
+              row_data.get("Отправка КМ запроса на сайты-доноры", "")
+              if not is_new
+              else ""
+          ),
+      )
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+      d_donor = st.text_input(
+          "Дата получения сайтов доноров",
+          value=(
+              row_data.get("Дата получения сайтов доноров", "")
+              if not is_new
+              else ""
+          ),
+      )
+    with col2:
+      d_sogl_send = st.text_input(
+          "Дата отправки на согласование",
+          value=(
+              row_data.get("Дата отправки на согласование", "")
+              if not is_new
+              else ""
+          ),
+      )
+    with col3:
+      d_sogl = st.text_input(
+          "Дата согласования",
+          value=row_data.get("Дата согласования", "") if not is_new else "",
+      )
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+      d_release = st.text_input(
+          "Дата вывода на Материк (с товарами)",
+          value=(
+              row_data.get("Дата вывода на Материк (с товарами)", "")
+              if not is_new
+              else ""
+          ),
+      )
+    with col2:
+      palas_alloc = st.text_input(
+          "Выделено на сайт Палас",
+          value=(
+              row_data.get("Выделено на сайт Палас", "") if not is_new else ""
+          ),
+      )
+    with col3:
+      kam_file = st.text_input(
+          "Добавлено в файл КАМ",
+          value=(
+              row_data.get("Добавлено в файл КАМ", "") if not is_new else ""
+          ),
+      )
+
+    submitted = st.form_submit_button("💾 Сохранить")
+
+    if submitted:
+      new_row = {
+          "Группа 1": g1,
+          "Группа 2": g2,
+          "Группа 3": g3,
+          "Менеджер": manager,
+          "Влючено Материк": mat_val,
+          "Включено Палас": pal_val,
+          "Количество скю": clean_number_str(sku),
+          "Дата начала работ": d_start,
+          "Отправка КМ запроса на сайты-доноры": d_req,
+          "Дата получения сайтов доноров": d_donor,
+          "Дата отправки на согласование": d_sogl_send,
+          "Дата согласования": d_sogl,
+          "Дата вывода на Материк (с товарами)": d_release,
+          "Выделено на сайт Палас": palas_alloc,
+          "Добавлено в файл КАМ": kam_file,
+      }
+
+      df_updated = full_df.copy()
+      if is_new:
+        df_updated = pd.concat(
+            [df_updated, pd.DataFrame([new_row])], ignore_index=True
+        )
+      else:
+        for k, v in new_row.items():
+          df_updated.at[row_index, k] = v
+
+      if save_groups_data(df_updated):
+        st.success("Данные успешно сохранены!")
+        st.rerun()
+
+
+# ==========================================
+# 3. ОСНОВНАЯ ВКЛАДКА "ОТКРЫТИЕ НОВЫХ ГРУПП"
 # ==========================================
 with main_tab2:
   st.subheader("📋 Вывод групп")
@@ -1885,18 +2106,17 @@ with main_tab2:
   ]
 
   if not df_raw.empty:
-    # Гарантируем наличие всех целевых колонок
     for col in target_columns:
       if col not in df_raw.columns:
         df_raw[col] = ""
 
     df_proc = df_raw[target_columns].copy()
 
-    # Чистим все числа от .0 во всей таблице
+    # Чистим числа во всей таблице
     for col in df_proc.columns:
       df_proc[col] = df_proc[col].apply(clean_number_str)
 
-    # Автозаполнение ВПР (Влючено Материк / Включено Палас) по полю "Группа 3"
+    # Автозаполнение ВПР при загрузке
     def apply_vlookup(row):
       grp = str(row["Группа 3"]).strip().lower()
       if grp:
@@ -1908,7 +2128,11 @@ with main_tab2:
 
     df_proc = df_proc.apply(apply_vlookup, axis=1)
 
-    # Условия фильтрации по вложенным вкладкам
+    # Кнопка добавления новой записи
+    if st.button("➕ Добавить новую группу", type="primary"):
+      group_editor_dialog({}, None, df_proc, dict_materik, dict_palas)
+
+    # Условия фильтрации
     kam_col = "Добавлено в файл КАМ"
     date_col = "Дата вывода на Материк (с товарами)"
 
@@ -1931,49 +2155,62 @@ with main_tab2:
         f"Добавить в файл ({len(df_add_file)})",
     ])
 
-    # Универсальная функция редактирования таблицы для каждой подвкладки
-    def display_editable_tab(sub_df, tab_key):
-      st.caption(
-          "💡 Вы можете редактировать ячейки прямо в таблице или добавлять"
-          " новые строки в самом низу таблицы."
+    def render_groups_table_with_actions(df_subset, tab_key):
+      if df_subset.empty:
+        st.info("Нет данных в этом разделе.")
+        return
+
+      # Генерируем кнопки редактирования над/внутри таблицы
+      cols_to_show = df_subset.columns.tolist()
+      headers_html = "<th>Действие</th>" + "".join(
+          [f"<th>{c}</th>" for c in cols_to_show]
       )
 
-      edited_df = st.data_editor(
-          sub_df,
-          key=f"editor_{tab_key}",
-          num_rows="dynamic",  # Разрешает добавление новых строк внизу
-          use_container_width=True,
-          height=500,
-          disabled=[
-              "Влючено Материк",
-              "Включено Палас",
-          ],  # Запрещаем ручное изменение колонок, заполняемых по ВПР
-      )
+      rows_html = []
+      for idx, row in df_subset.iterrows():
+        # Добавляем ссылку/кнопку вызова с уникальным ID
+        edit_btn_html = (
+            f"<td><a href='?edit_id={idx}' target='_self' style='text-decoration:"
+            " none;'>✏️ Edit</a></td>"
+        )
+        cells = "".join([f"<td>{row[c]}</td>" for c in cols_to_show])
+        rows_html.append(f"<tr>{edit_btn_html}{cells}</tr>")
 
-      if st.button("💾 Сохранить изменения в Google Таблицу", key=f"btn_{tab_key}"):
-        # Объединяем измененный срез обратно с полным DataFrame
-        updated_full_df = df_proc.copy()
-        updated_full_df.update(edited_df)
+      table_html = f"""
+            <div class="groups-table-container">
+                <table class="groups-table">
+                    <thead><tr>{headers_html}</tr></thead>
+                    <tbody>{"".join(rows_html)}</tbody>
+                </table>
+            </div>
+            """
+      st.markdown(table_html, unsafe_allow_html=True)
 
-        # Если были добавлены новые строки через editor
-        new_rows = edited_df[~edited_df.index.isin(df_proc.index)]
-        if not new_rows.empty:
-          updated_full_df = pd.concat(
-              [updated_full_df, new_rows], ignore_index=True
+    # Проверка, кликнули ли по кнопке ✏️ Edit
+    query_params = st.query_params
+    if "edit_id" in query_params:
+      try:
+        edit_idx = int(query_params["edit_id"])
+        st.query_params.clear()
+        if edit_idx in df_proc.index:
+          group_editor_dialog(
+              df_proc.loc[edit_idx].to_dict(),
+              edit_idx,
+              df_proc,
+              dict_materik,
+              dict_palas,
           )
-
-        if save_groups_data(updated_full_df):
-          st.success("Данные успешно сохранены в Google Таблицу!")
-          st.rerun()
+      except Exception:
+        pass
 
     with sub_tab1:
-      display_editable_tab(df_in_progress, "in_progress")
+      render_groups_table_with_actions(df_in_progress, "in_prog")
 
     with sub_tab2:
-      display_editable_tab(df_released, "released")
+      render_groups_table_with_actions(df_released, "rel")
 
     with sub_tab3:
-      display_editable_tab(df_add_file, "add_file")
+      render_groups_table_with_actions(df_add_file, "add_f")
 
   else:
-    st.warning("Данные не найдены.")
+    st.warning("Не удалось загрузить данные из таблицы.")
