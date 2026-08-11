@@ -97,6 +97,7 @@ st.markdown(
         border-radius: 6px;
         font-weight: 600;
         font-size: 0.8rem;
+        display: inline-block;
     }
     .normal-badge {
         background-color: #f0f2f5;
@@ -105,6 +106,28 @@ st.markdown(
         border-radius: 6px;
         font-weight: 500;
         font-size: 0.8rem;
+        display: inline-block;
+    }
+
+    /* СТИЛИ ДЛЯ БАБЛОВ (ТЕГОВ) ИСПОЛНИТЕЛЕЙ */
+    .executors-container {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        align-items: center;
+        margin-top: 4px;
+        margin-bottom: 8px;
+    }
+    .executor-bubble {
+        background-color: #e1f5fe;
+        color: #0288d1;
+        border: 1px solid #b3e5fc;
+        padding: 2px 10px;
+        border-radius: 12px;
+        font-size: 0.82rem;
+        font-weight: 500;
+        display: inline-flex;
+        align-items: center;
     }
     </style>
 """,
@@ -251,7 +274,6 @@ def save_dept_data(dept_info, df):
       full_df = df[COLUMNS].copy()
 
     full_df = full_df.fillna('').astype(str)
-    
     full_df['ID'] = [str(i + 1) for i in range(len(full_df))]
 
     data_to_write = [COLUMNS] + full_df.values.tolist()
@@ -646,6 +668,16 @@ def render_grouped_html_table(df, group_col, cols_order, headers):
 
   html += '</tbody></table></div>'
   return html
+
+
+def render_executor_bubbles(executors_str):
+  """Форматирует строку с исполнителями в HTML-баблы."""
+  if not executors_str or not executors_str.strip():
+    return "<span style='color: #888;'>Не назначены</span>"
+  
+  names = [n.strip() for n in executors_str.split(',') if n.strip()]
+  bubbles_html = "".join([f"<span class='executor-bubble'>👤 {name}</span>" for name in names])
+  return f"<div class='executors-container'>{bubbles_html}</div>"
 
 
 # ==========================================
@@ -1093,6 +1125,82 @@ def modal_add_task():
           st.rerun()
 
 
+@st.dialog('✏️ Редактировать задачу')
+def modal_edit_task(task_row):
+  """Модальное окно для полного редактирования выбранной задачи."""
+  t_id = task_row['ID']
+
+  with st.form(f'edit_task_form_{t_id}'):
+    edit_title = st.text_input('Тема задачи *', value=task_row['Тема'])
+
+    col1, col2 = st.columns(2)
+    with col1:
+      urg_options = ['Текущая задача', 'Срочно']
+      urg_index = urg_options.index(task_row['Срочность']) if task_row['Срочность'] in urg_options else 0
+      edit_urgency = st.selectbox('Срочность:', urg_options, index=urg_index)
+    with col2:
+      st_options = ['Новая', 'В работе', 'Завершена']
+      st_index = st_options.index(task_row['Статус']) if task_row['Статус'] in st_options else 0
+      edit_status = st.selectbox('Статус:', st_options, index=st_index)
+
+    edit_executors = st.text_input(
+        'Исполнитель(и) *',
+        value=task_row['Исполнители'],
+        help='Указывайте имена через запятую',
+    )
+
+    edit_desc = st.text_area(
+        'Описание задачи',
+        value=task_row['Описание'],
+        height=150,
+    )
+
+    if task_row['Изображения Base64']:
+      st.markdown('**Текущее изображение:**')
+      st.image(task_row['Изображения Base64'], width=250)
+
+    uploaded_img = st.file_uploader(
+        'Заменить / прикрепить новое изображение',
+        type=['png', 'jpg', 'jpeg', 'webp'],
+        accept_multiple_files=False,
+        key=f'edit_img_{t_id}',
+    )
+
+    btn_update = st.form_submit_button('Сохранить изменения', use_container_width=True)
+
+    if btn_update:
+      if not edit_title.strip():
+        st.warning('Заполните поле "Тема задачи"!')
+      elif not edit_executors.strip():
+        st.warning('Укажите хотя бы одного исполнителя!')
+      else:
+        tasks_df = load_tasks_data()
+        now_str = datetime.datetime.now().strftime('%d.%m.%Y %H:%M')
+
+        # Обработка картинки
+        img_b64 = task_row['Изображения Base64']
+        if uploaded_img is not None:
+          bytes_data = uploaded_img.getvalue()
+          b64_str = base64.b64encode(bytes_data).decode('utf-8')
+          mime_type = uploaded_img.type
+          img_b64 = f'data:{mime_type};base64,{b64_str}'
+
+        execs_clean = ', '.join([e.strip() for e in edit_executors.split(',') if e.strip()])
+
+        mask = tasks_df['ID'] == t_id
+        tasks_df.loc[mask, 'Тема'] = edit_title.strip()
+        tasks_df.loc[mask, 'Описание'] = edit_desc.strip()
+        tasks_df.loc[mask, 'Исполнители'] = execs_clean
+        tasks_df.loc[mask, 'Статус'] = edit_status
+        tasks_df.loc[mask, 'Срочность'] = edit_urgency
+        tasks_df.loc[mask, 'Изображения Base64'] = img_b64
+        tasks_df.loc[mask, 'Дата обновления'] = now_str
+
+        if save_all_tasks(tasks_df):
+          st.success('Задача успешно обновлена!')
+          st.rerun()
+
+
 # ==========================================
 # 5. ОСНОВНОЙ ИНТЕРФЕЙС STREAMLIT
 # ==========================================
@@ -1337,11 +1445,20 @@ with main_tab3:
             if is_urgent
             else f"<span class='normal-badge'>📌 {t_urgency}</span>"
         )
+        bubbles_html = render_executor_bubbles(t_execs)
 
-        with st.expander(f"#{t_id} | {t_title} — {t_execs}", expanded=False):
-          st.markdown(f"**Срочность:** {badge_html}", unsafe_allow_html=True)
-          st.markdown(f"**Исполнитель(и):** {t_execs}")
-          st.caption(f"Дата создания: {t_date}")
+        with st.expander(f"#{t_id} | {t_title}", expanded=False):
+          col_info, col_edit_btn = st.columns([3, 1])
+
+          with col_info:
+            st.markdown(f"**Срочность:** {badge_html}", unsafe_allow_html=True)
+            st.markdown("**Исполнители:**", unsafe_allow_html=True)
+            st.markdown(bubbles_html, unsafe_allow_html=True)
+            st.caption(f"Дата создания: {t_date}")
+
+          with col_edit_btn:
+            if st.button('✏️ Редактировать', key=f'btn_modal_edit_{t_id}', use_container_width=True):
+              modal_edit_task(row)
 
           st.divider()
 
@@ -1355,11 +1472,11 @@ with main_tab3:
 
           st.divider()
 
-          # Управление статусом задачи
+          # Быстрое изменение статуса задачи
           c_sel, c_sav = st.columns([2, 1])
           with c_sel:
             new_st = st.selectbox(
-                'Изменить статус:',
+                'Быстрая смена статуса:',
                 ['Новая', 'В работе', 'Завершена'],
                 index=['Новая', 'В работе', 'Завершена'].index(t_status) if t_status in ['Новая', 'В работе', 'Завершена'] else 0,
                 key=f'status_sel_{t_id}',
@@ -1367,7 +1484,7 @@ with main_tab3:
           with c_sav:
             st.write('')
             st.write('')
-            if st.button('Сохранить', key=f'btn_save_status_{t_id}'):
+            if st.button('Сохранить статус', key=f'btn_save_status_{t_id}'):
               tasks_df.loc[tasks_df['ID'] == t_id, 'Статус'] = new_st
               tasks_df.loc[tasks_df['ID'] == t_id, 'Дата обновления'] = datetime.datetime.now().strftime('%d.%m.%Y %H:%M')
               if save_all_tasks(tasks_df):
