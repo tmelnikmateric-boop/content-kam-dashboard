@@ -1532,3 +1532,52 @@ with main_tab3:
         else:
           for _, task_row in done_tasks.iterrows():
             render_task_card(task_row)
+
+# 1. Функция загрузки и фильтрации столбцов из Google Sheets
+@st.cache_data(ttl=600)  # Кэширование на 10 минут
+def load_groups_data():
+    sheet_id = "1LABW3U4TdX6cDjps_g_mBBsWRW8_Xx7W8LqBZB4CO2g"
+    sheet_name = "Вывод групп"
+    url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
+
+    # Чтение данных из Google Таблицы
+    df = pd.read_csv(url)
+
+    # Список нужных столбцов
+    target_columns = [
+        "Группа 1",
+        "Группа 2",
+        "Группа 3",
+        "Влючено Материк",
+        "Включено Палас",
+        "Количество скю",
+        "Дата начала работ",
+        "Отправка КМ запроса на сайты-доноры",
+        "Дата получения сайтов доноров",
+        "Дата отправки на согласование",
+        "Дата согласования",
+        "Дата вывода на Материк (с товарами)",
+        "Выделено на сайт Палас",
+        "Добавлено в файл КАМ",
+    ]
+
+    # Фильтрация (выбираем только те столбцы из списка, которые присутствуют в таблице)
+    existing_cols = [c for c in target_columns if c in df.columns]
+    df_filtered = df[existing_cols].fillna("")
+
+    return df_filtered
+
+
+# 2. Вывод таблицы во вкладке "Открытие групп"
+# Вставьте этот блок внутри вашей вкладки tab_opening (или где вы объявляете эту вкладку):
+
+# with tab_opening:
+try:
+    data = load_groups_data()
+    st.dataframe(
+        data,
+        use_container_width=True,
+        hide_index=True,
+    )
+except Exception as e:
+    st.error(f"Ошибка при загрузке данных из Google Таблицы: {e}")
