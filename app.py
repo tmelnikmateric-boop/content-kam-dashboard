@@ -23,7 +23,7 @@ st.markdown(
         margin-bottom: 25px;
     }
     
-    /* Стили для радиобнопок («Отдел контента» / «Коммерческий отдел»): мелкий шрифт, выравнивание слева */
+    /* Стили для переключателя отделов: слева, размер 0.95rem */
     div[data-testid="stRadio"] > label {
         display: none;
     }
@@ -36,14 +36,24 @@ st.markdown(
         font-weight: 500 !important;
     }
 
-    /* Стили для 3 основных вкладок: крупный шрифт (как у отдела), выравнивание по центру */
-    div[data-testid="stTabs"] [data-baseweb="tab-list"] {
+    /* 1. ГЛАВНЫЕ ВКТАДКИ (самый верхний блок st.tabs): по центру, размер 1.25rem */
+    div[data-testid="stMainBlockContainer"] > div:nth-of-type(1) div[data-testid="stTabs"] [data-baseweb="tab-list"] {
         justify-content: center !important;
         gap: 30px;
     }
-    div[data-testid="stTabs"] [data-baseweb="tab"] p {
+    div[data-testid="stMainBlockContainer"] > div:nth-of-type(1) div[data-testid="stTabs"] [data-baseweb="tab"] p {
         font-size: 1.25rem !important;
         font-weight: 600 !important;
+    }
+
+    /* 2. ВЛОЖЕННЫЕ ПОДВКЛАДКИ (Новые, В работе, Завершенные): слева, размер 1rem */
+    div[data-testid="stTabs"] [data-baseweb="tab-list"] {
+        justify-content: flex-start !important;
+        gap: 15px;
+    }
+    div[data-testid="stTabs"] [data-baseweb="tab"] p {
+        font-size: 1rem !important;
+        font-weight: 500 !important;
     }
 
     div[role="dialog"], div[data-testid="stDialog"] > div:nth-child(2) {
