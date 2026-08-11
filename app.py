@@ -23,7 +23,7 @@ st.markdown(
         margin-bottom: 25px;
     }
     
-    /* Стили для переключателя отделов: слева, размер 0.95rem */
+    /* Стили для переключателя отделов: слева, мелкий шрифт */
     div[data-testid="stRadio"] > label {
         display: none;
     }
@@ -36,22 +36,22 @@ st.markdown(
         font-weight: 500 !important;
     }
 
-    /* 1. ГЛАВНЫЕ ВКТАДКИ (самый верхний блок st.tabs): по центру, размер 1.25rem */
-    div[data-testid="stMainBlockContainer"] > div:nth-of-type(1) div[data-testid="stTabs"] [data-baseweb="tab-list"] {
+    /* 1. ГЛАВНЫЕ (ВЕРХНИЕ) ВКЛАДКИ: по центру, размер 1.25rem */
+    div[data-testid="stTabs"] [data-baseweb="tab-list"] {
         justify-content: center !important;
         gap: 30px;
     }
-    div[data-testid="stMainBlockContainer"] > div:nth-of-type(1) div[data-testid="stTabs"] [data-baseweb="tab"] p {
+    div[data-testid="stTabs"] [data-baseweb="tab"] p {
         font-size: 1.25rem !important;
         font-weight: 600 !important;
     }
 
     /* 2. ВЛОЖЕННЫЕ ПОДВКЛАДКИ (Новые, В работе, Завершенные): слева, размер 1rem */
-    div[data-testid="stTabs"] [data-baseweb="tab-list"] {
+    div[data-testid="stTabs"] div[data-testid="stTabs"] [data-baseweb="tab-list"] {
         justify-content: flex-start !important;
-        gap: 15px;
+        gap: 15px !important;
     }
-    div[data-testid="stTabs"] [data-baseweb="tab"] p {
+    div[data-testid="stTabs"] div[data-testid="stTabs"] [data-baseweb="tab"] p {
         font-size: 1rem !important;
         font-weight: 500 !important;
     }
