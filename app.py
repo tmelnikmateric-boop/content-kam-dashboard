@@ -231,18 +231,21 @@ SHEET_MAP = {
     },
 }
 
+# Включены 'Причина паузы' и 'Дата паузы' в основной список колонок для обоих отделов
 COLUMNS = [
     'ID',                      # A - Номер по-порядку
     'Внешний код',             # B - Внешний код (из файла)
     'Группа 3',                # C - Группа 3 (из файла)
     'Наименование',            # D - Наименование (из файла)
     'Статус',                  # E - Статус (🆕 Новый)
-    'Исполнитель',             # F - Исполнитель (пустое)
-    'Дата взятия',             # G - Дата взятия (пустое)
-    'Дата выполнения',         # H - Дата выполнения (пустое)
-    'Дата завершения работы',  # I - Дата завершения работы (пустое)
-    'Источник',                # J - Источник (название файла)
-    'Дата загрузки',           # K - Дата загрузки (время загрузки)
+    'Причина паузы',           # F - Причина паузы
+    'Дата паузы',              # G - Дата паузы
+    'Исполнитель',             # H - Исполнитель
+    'Дата взятия',             # I - Дата взятия
+    'Дата выполнения',         # J - Дата выполнения
+    'Дата завершения работы',  # K - Дата завершения работы
+    'Источник',                # L - Источник (название файла)
+    'Дата загрузки',           # M - Дата загрузки (время загрузки)
 ]
 
 CONTACTS_SHEET_NAME = '📇 Контакты поставщиков'
@@ -681,9 +684,9 @@ def build_summary(df):
     date_pause = get_clean_val(['Дата паузы'])
     date_added = get_clean_val(['Дата загрузки'])
 
-    is_completed = st_val in ['выполнено', 'выполнен', 'завершен', '✅ выполнен', '✅ завершена'] or bool(date_done)
+    is_completed = st_val in ['выполнено', 'выполнен', 'завершен', '✅ выполнен', '✅ завершена']
     is_paused = st_val in ['пауза', 'на паузе', '⏸️ на паузе'] or '⏸' in st_val
-    is_in_work = not is_completed and not is_paused and (st_val in ['в работе', 'взято в работу', '🔄 в работе'] or bool(date_take))
+    is_in_work = st_val in ['в работе', 'взято в работу', '🔄 в работе'] or (bool(date_take) and not is_completed and not is_paused)
 
     if is_completed:
       done_cnt, in_work_cnt, new_cnt, group_status = total, 0, 0, '✅ Выполнен'
@@ -796,6 +799,10 @@ def modal_take_in_work(dept_info, summary_df, df):
       df.loc[mask, 'Статус'] = 'В работе'
       df.loc[mask, 'Исполнитель'] = executor_name.strip()
       df.loc[mask, 'Дата взятия'] = now_str
+      df.loc[mask, 'Дата завершения работы'] = ''
+      df.loc[mask, 'Дата выполнения'] = ''
+      df.loc[mask, 'Причина паузы'] = ''
+      df.loc[mask, 'Дата паузы'] = ''
 
       if save_dept_data(dept_info, df):
         st.success("Статус обновлен на 'В работе'")
@@ -832,10 +839,8 @@ def modal_pause(dept_info, summary_df, df):
       mask = df['Источник'].isin(selected_files)
 
       df.loc[mask, 'Статус'] = 'Пауза'
-      if 'Причина паузы' in df.columns:
-        df.loc[mask, 'Причина паузы'] = pause_reason
-      if 'Дата паузы' in df.columns:
-        df.loc[mask, 'Дата паузы'] = now_str
+      df.loc[mask, 'Причина паузы'] = pause_reason
+      df.loc[mask, 'Дата паузы'] = now_str
 
       if save_dept_data(dept_info, df):
         st.success('Файлы переведены на паузу!')
@@ -866,10 +871,8 @@ def modal_unpause(dept_info, summary_df, df):
       mask = df['Источник'].isin(selected_files)
 
       df.loc[mask, 'Статус'] = 'В работе'
-      if 'Причина паузы' in df.columns:
-        df.loc[mask, 'Причина паузы'] = ''
-      if 'Дата паузы' in df.columns:
-        df.loc[mask, 'Дата паузы'] = ''
+      df.loc[mask, 'Причина паузы'] = ''
+      df.loc[mask, 'Дата паузы'] = ''
 
       if save_dept_data(dept_info, df):
         st.success('Файлы успешно возвращены в работу!')
@@ -1352,6 +1355,8 @@ with main_tab1:
                     'Группа 3': mapped_data['Группа 3'],
                     'Наименование': mapped_data['Наименование'],
                     'Статус': ['🆕 Новый'] * num_rows,
+                    'Причина паузы': [''] * num_rows,
+                    'Дата паузы': [''] * num_rows,
                     'Исполнитель': [''] * num_rows,
                     'Дата взятия': [''] * num_rows,
                     'Дата выполнения': [''] * num_rows,
@@ -1474,18 +1479,20 @@ with main_tab1:
         else:
           cols_completed = [c for c in ['Имя файла', 'Группа 3', 'Количество товаров', 'Исполнитель', 'Дата начала работы', 'Дата завершения работы'] if c in completed_summary.columns]
           st.dataframe(completed_summary[cols_completed], use_container_width=True, hide_index=True)
+
 st.link_button(
     "📥 Загруженные данные контента",
     "https://docs.google.com/spreadsheets/d/1vCZQgzBPv8uahr8ckRI1f-TA_QS6Afz2B9NP_ZMj6ek/edit?gid=59376984#gid=59376984",
-    type="secondary",  # Вы можете заменить на "primary" для акцентного цвета
-    use_container_width=False,  # Поставьте True, если нужно растянуть на всю ширину
+    type="secondary",
+    use_container_width=False,
 )
 st.link_button(
     "📥 Загруженные данные КАМ",
     "https://docs.google.com/spreadsheets/d/1vCZQgzBPv8uahr8ckRI1f-TA_QS6Afz2B9NP_ZMj6ek/edit?gid=183144046#gid=183144046",
-    type="secondary",  # Вы можете заменить на "primary" для акцентного цвета
-    use_container_width=False,  # Поставьте True, если нужно растянуть на всю ширину
+    type="secondary",
+    use_container_width=False,
 )
+
 # ------------------------------------------
 # ВКЛАДКА 3: ЗАДАЧИ
 # ------------------------------------------
@@ -1504,7 +1511,6 @@ with main_tab3:
     if tasks_df.empty:
       st.info('Задач пока нет. Нажмите «Добавить задачу», чтобы создать первую.')
     else:
-      # Фильтрация по статусам
       new_tasks = tasks_df[tasks_df['Статус'] == 'Новая']
       work_tasks = tasks_df[tasks_df['Статус'] == 'В работе']
       done_tasks = tasks_df[tasks_df['Статус'] == 'Завершена']
@@ -1558,7 +1564,6 @@ with main_tab3:
 
           st.divider()
 
-          # Быстрое изменение статуса задачи
           c_sel, c_sav = st.columns([2, 1])
           with c_sel:
             new_st = st.selectbox(
@@ -1599,12 +1604,8 @@ with main_tab3:
             render_task_card(task_row)
 
 # ==========================================
-# Вкладка 2 ОТКРЫТИЕ ГРУПП
+# ВКЛАДКА 2: ОТКРЫТИЕ ГРУПП
 # ==========================================
-# ==========================================
-# 1. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ И ОЧИСТКА
-# ==========================================
-
 
 def clean_number_str(val):
   """Убирает .0, float-мусор и форматирует числа безопасно для Pandas Series"""
@@ -1639,7 +1640,6 @@ def load_all_sheet_data():
     gc = get_gspread_client()
     sh = gc.open_by_key(sheet_id)
 
-    # 1. Основной лист "Вывод групп"
     ws_main = sh.worksheet("Вывод групп")
     vals_main = ws_main.get_all_values()
 
@@ -1649,7 +1649,6 @@ def load_all_sheet_data():
       headers = [str(h).strip() for h in vals_main[0]]
       df_main = pd.DataFrame(vals_main[1:], columns=headers).astype(str)
 
-    # 2. Справочник "Материк статус"
     dict_materik = {}
     try:
       ws_mat = sh.worksheet("Материк статус")
@@ -1662,7 +1661,6 @@ def load_all_sheet_data():
     except Exception:
       pass
 
-    # 3. Справочник "Палас статус"
     dict_palas = {}
     try:
       ws_pal = sh.worksheet("Палас статус")
@@ -1684,7 +1682,7 @@ def load_all_sheet_data():
 
 @st.cache_data(ttl=300)
 def load_group_order_data():
-  """Загружает данные с листа 'Порядок расположения групп на сайте' с защитой PyArrow"""
+  """Загружает данные с листа 'Порядок расположения групп на сайте'"""
   sheet_id = "1LABW3U4TdX6cDjps_g_mBBsWRW8_Xx7W8LqBZB4CO2g"
   try:
     gc = get_gspread_client()
@@ -1695,10 +1693,8 @@ def load_group_order_data():
     if not vals or len(vals) <= 1:
       return pd.DataFrame()
 
-    # 1. Очищаем заголовки
     raw_headers = [str(h).strip() for h in vals[0]]
 
-    # 2. Гарантируем уникальность названий колонок (устраняет ValueError в PyArrow)
     headers = []
     seen = {}
     for idx, h in enumerate(raw_headers):
@@ -1710,10 +1706,8 @@ def load_group_order_data():
         seen[h_name] = 0
         headers.append(h_name)
 
-    # 3. Собираем DataFrame
     df_order = pd.DataFrame(vals[1:], columns=headers).astype(str)
 
-    # 4. Безопасная очистка чисел от .0
     for col in df_order.columns:
       df_order[col] = df_order[col].map(clean_number_str)
 
@@ -1724,6 +1718,7 @@ def load_group_order_data():
         f"Ошибка загрузки листа 'Порядок расположения групп на сайте': {e}"
     )
     return pd.DataFrame()
+
 
 def save_groups_data(df_to_save):
   """Сохраняет измененный DataFrame в Google Таблицу"""
@@ -1746,9 +1741,6 @@ def save_groups_data(df_to_save):
     return False
 
 
-# ==========================================
-# 2. МОДАЛЬНЫЕ ОКНА
-# ==========================================
 @st.dialog("✏️ Редактирование / Добавление группы", width="large")
 def group_editor_dialog(row_data, row_index, full_df, dict_materik, dict_palas):
   is_new = row_index is None
@@ -1768,7 +1760,6 @@ def group_editor_dialog(row_data, row_index, full_df, dict_materik, dict_palas):
           "Группа 3", value=row_data.get("Группа 3", "") if not is_new else ""
       )
 
-    # Авторасчет статусов ВПР при указании Группы 3
     grp_key = str(g3).strip().lower()
     mat_val = dict_materik.get(
         grp_key, row_data.get("Влючено Материк", "") if not is_new else ""
@@ -1895,7 +1886,6 @@ def group_editor_dialog(row_data, row_index, full_df, dict_materik, dict_palas):
 
 @st.dialog("📌 Порядок расположения групп на сайте", width="large")
 def show_group_order_dialog():
-  """Модальное окно с информацией о порядке расположения групп"""
   df_order = load_group_order_data()
   if not df_order.empty:
     st.dataframe(df_order, use_container_width=True, height=500)
@@ -1903,9 +1893,6 @@ def show_group_order_dialog():
     st.info("Информация на листе отсутствует или не найдена.")
 
 
-# ==========================================
-# 3. ОСНОВНАЯ ВКЛАДКА "ОТКРЫТИЕ НОВЫХ ГРУПП"
-# ==========================================
 with main_tab2:
   st.subheader("📋 Вывод групп")
 
@@ -1936,11 +1923,9 @@ with main_tab2:
 
     df_proc = df_raw[target_columns].copy()
 
-    # Чистим числа во всей таблице через map
     for col in df_proc.columns:
       df_proc[col] = df_proc[col].map(clean_number_str)
 
-    # Автозаполнение ВПР при загрузке
     def apply_vlookup(row):
       grp = str(row["Группа 3"]).strip().lower()
       if grp:
@@ -1952,11 +1937,9 @@ with main_tab2:
 
     df_proc = df_proc.apply(apply_vlookup, axis=1)
 
-    # Кнопка добавления новой записи
     if st.button("➕ Добавить новую группу", type="primary"):
       group_editor_dialog({}, None, df_proc, dict_materik, dict_palas)
 
-    # Условия фильтрации
     kam_col = "Добавлено в файл КАМ"
     date_col = "Дата вывода на Материк (с товарами)"
 
@@ -2007,7 +1990,6 @@ with main_tab2:
                 """
         st.markdown(table_html, unsafe_allow_html=True)
 
-      # Кнопка внизу под таблицей для вызова модального окна
       st.markdown("---")
       if st.button(
           "📌 Посмотреть порядок расположения групп на сайте",
@@ -2015,7 +1997,6 @@ with main_tab2:
       ):
         show_group_order_dialog()
 
-    # Проверка, кликнули ли по кнопке ✏️ Edit
     query_params = st.query_params
     if "edit_id" in query_params:
       try:
