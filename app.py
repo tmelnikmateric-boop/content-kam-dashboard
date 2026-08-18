@@ -1134,6 +1134,8 @@ def modal_contacts():
     st.info('Контакты пока не добавлены.')
 
 
+import io
+
 @st.dialog('📦 Новые товары')
 def modal_new_products():
   tab_upload, tab_view, tab_summary = st.tabs([
@@ -1180,7 +1182,7 @@ def modal_new_products():
         st.write(f'Всего SKU в партии: **{len(batch_df)}**')
         st.dataframe(batch_df, use_container_width=True, hide_index=True)
 
-  # Вкладка 3: Сводная таблица по Дате / Менеджеру / Группе
+  # Вкладка 3: Сводная таблица по Дате / Менеджеру / Группе с Печатью
   with tab_summary:
     st.subheader('📊 Сводная отчетность: Менеджер + Группа')
 
@@ -1247,8 +1249,71 @@ def modal_new_products():
 
         st.markdown('---')
 
-        # Вывод сводной таблицы
-        st.dataframe(summary_pivot, use_container_width=True, hide_index=True)
+        # БЛОК ЭКСПОРТА И ПЕЧАТИ
+        btn_col1, btn_col2 = st.columns([1, 1])
+
+        # 1. Формирование файла Excel для скачивания
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+          summary_pivot.to_excel(writer, sheet_name='Сводная', index=False)
+        excel_data = output.getvalue()
+
+        with btn_col1:
+          st.download_button(
+              label='📥 Скачать Excel (для печати)',
+              data=excel_data,
+              file_name=f'Сводная_товары_{selected_date}.xlsx',
+              mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+              use_container_width=True,
+          )
+
+        # 2. Опция быстрого просмотра для печати из браузера (Ctrl+P)
+        with btn_col2:
+          show_print_view = st.checkbox('🖨️ Режим печати (HTML)')
+
+        if show_print_view:
+          st.info(
+              'Нажмите **Ctrl + P** (или **Cmd + P** на Mac) для печати этой страницы из браузера.'
+          )
+          # Создаем чистую HTML-таблицу специально для печатного вида
+          print_html = f"""
+                    <div style="padding: 20px; font-family: Arial, sans-serif;">
+                        <h2 style="text-align: center;">Сводный отчет по новым товарам</h2>
+                        <p><b>Дата загрузки:</b> {selected_date}</p>
+                        <p><b>Всего SKU:</b> {total_sku} шт. | <b>Менеджеров:</b> {unique_mngs} | <b>Групп:</b> {unique_grps}</p>
+                        <table style="width: 100%; border-collapse: collapse; margin-top: 15px;" border="1" cellpadding="8">
+                            <thead>
+                                <tr style="background-color: #f2f2f2;">
+                                    <th style="text-align: left;">Менеджер</th>
+                                    <th style="text-align: left;">Группа (Раздел)</th>
+                                    <th style="text-align: center;">Количество SKU</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                    """
+          for _, row in summary_pivot.iterrows():
+            print_html += f"""
+                            <tr>
+                                <td>{row['Менеджер']}</td>
+                                <td>{row['Группа (Раздел)']}</td>
+                                <td style="text-align: center;">{row['Количество SKU']}</td>
+                            </tr>
+                            """
+          print_html += f"""
+                                <tr style="font-weight: bold; background-color: #f9f9f9;">
+                                    <td colspan="2" style="text-align: right;">ИТОГО SKU:</td>
+                                    <td style="text-align: center;">{total_sku}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    """
+          st.components.v1.html(print_html, height=500, scrolling=True)
+        else:
+          # Стандартный просмотр таблицы
+          st.dataframe(
+              summary_pivot, use_container_width=True, hide_index=True
+          )
       else:
         st.warning('За выбранную дату нет записей.')
 
