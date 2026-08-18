@@ -1699,105 +1699,137 @@ st.link_button(
     use_container_width=False,
 )
 
-# ------------------------------------------
-# ВКЛАДКА 3: ЗАДАЧИ (UI В СТИЛЕ СКИЗУ/РЕФЕРЕНСА)
-# ------------------------------------------
-with main_tab3:
-    # --- CSS СТИЛИ ДЛЯ КАРТОЧЕК ---
-    st.markdown("""
-        <style>
-        .kanban-card {
-            background-color: #ffffff;
-            border-radius: 12px;
-            padding: 16px;
-            margin-bottom: 14px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-            border: 1px solid #eef2f6;
-            font-family: system-ui, -apple-system, sans-serif;
-        }
-        .card-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 11px;
-            color: #8c98a4;
-            margin-bottom: 6px;
-            font-weight: 600;
-        }
-        .card-title {
-            font-size: 15px;
-            font-weight: 700;
-            color: #1e293b;
-            margin-bottom: 8px;
-            line-height: 1.3;
-        }
-        .card-desc {
-            font-size: 12px;
-            color: #64748b;
-            margin-bottom: 12px;
-            display: -webkit-box;
-            -webkit-line-clamp: 2;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
-        }
-        .card-meta {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 12px;
-            margin-bottom: 10px;
-        }
-        .badge-urgent {
-            background-color: #fef2f2;
-            color: #dc2626;
-            padding: 2px 8px;
-            border-radius: 6px;
-            font-weight: 600;
-            font-size: 11px;
-        }
-        .badge-normal {
-            background-color: #f1f5f9;
-            color: #475569;
-            padding: 2px 8px;
-            border-radius: 6px;
-            font-weight: 500;
-            font-size: 11px;
-        }
-        .card-footer {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding-top: 8px;
-            border-top: 1px solid #f1f5f9;
-            font-size: 12px;
-            color: #475569;
-        }
-        .executor-tag {
-            background: #f8fafc;
-            border: 1px solid #e2e8f0;
-            padding: 3px 8px;
-            border-radius: 20px;
-            font-size: 11px;
-            font-weight: 500;
-        }
-        .column-header {
-            background: #f1f5f9;
-            padding: 10px 14px;
-            border-radius: 8px;
-            font-weight: 700;
-            font-size: 14px;
-            color: #334155;
-            margin-bottom: 12px;
-            text-align: center;
-        }
-        </style>
-    """, unsafe_allow_html=True)
+import streamlit as st
+import pandas as pd
+import datetime
+import base64
 
-    # --- 1. ЗАГРУЗКА ДАННЫХ ИЗ GOOGLE SHEETS ---
+# -----------------------------------------------------------------------------
+# ГЛОБАЛЬНЫЕ СТИЛИ (ФОН #f7f7f7, ШРИФТЫ, КВАДРАТНЫЕ КАРТОЧКИ И ВНУТРЕННИЕ КНОПКИ)
+# -----------------------------------------------------------------------------
+st.markdown("""
+    <style>
+    /* 1. Глобальный фон приложения и сброс шрифта BlinkMacSystemFont */
+    .stApp, [data-testid="stAppViewContainer"] {
+        background-color: #f7f7f7 !important;
+    }
+    
+    html, body, [class*="css"], div, span, button, input, textarea, select {
+        font-family: 'Inter', -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif !important;
+    }
+
+    /* 2. Фиксация 3 равных колонок Канбана */
+    [data-testid="column"] {
+        min-width: 280px !important;
+        flex: 1 1 0px !important;
+    }
+
+    /* 3. Заголовки колонок */
+    .kanban-col-header {
+        background-color: #ffffff;
+        padding: 10px 14px;
+        border-radius: 10px;
+        font-weight: 700;
+        font-size: 13px;
+        color: #334155;
+        text-align: center;
+        margin-bottom: 14px;
+        border: 1px solid #e2e8f0;
+        letter-spacing: 0.5px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+    }
+
+    /* 4. Квадратный контейнер карточки */
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        background: #ffffff !important;
+        border-radius: 12px !important;
+        border: 1px solid #e2e8f0 !important;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03) !important;
+        padding: 14px !important;
+        margin-bottom: 12px !important;
+        transition: all 0.2s ease !important;
+        aspect-ratio: 1 / 1 !important; /* Квадратная пропорция */
+        display: flex !important;
+        flex-direction: column !important;
+        justify-content: space-between !important;
+    }
+
+    div[data-testid="stVerticalBlockBorderWrapper"]:hover {
+        border-color: #cbd5e1 !important;
+        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.06) !important;
+        transform: translateY(-2px);
+    }
+
+    /* 5. Элементы внутри карточки */
+    .card-task-title {
+        font-weight: 700;
+        font-size: 14px;
+        color: #0f172a;
+        line-height: 1.3;
+        margin-top: 6px;
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+
+    .card-executor {
+        font-size: 12px;
+        color: #64748b;
+        margin-top: 4px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .card-badge-urgent {
+        background-color: #fef2f2;
+        color: #dc2626;
+        padding: 2px 6px;
+        border-radius: 6px;
+        font-size: 10px;
+        font-weight: 700;
+    }
+
+    .card-badge-normal {
+        background-color: #f8fafc;
+        color: #64748b;
+        padding: 2px 6px;
+        border-radius: 6px;
+        font-size: 10px;
+        font-weight: 600;
+        border: 1px solid #e2e8f0;
+    }
+
+    /* 6. Кнопка "Открыть" прямо НА самой карточке */
+    div[data-testid="stVerticalBlockBorderWrapper"] button {
+        background-color: #f8fafc !important;
+        color: #334155 !important;
+        border: 1px solid #e2e8f0 !important;
+        border-radius: 8px !important;
+        font-size: 12px !important;
+        font-weight: 600 !important;
+        margin-top: 8px !important;
+        transition: all 0.15s ease !important;
+    }
+
+    div[data-testid="stVerticalBlockBorderWrapper"] button:hover {
+        background-color: #2563eb !important;
+        color: #ffffff !important;
+        border-color: #2563eb !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# -----------------------------------------------------------------------------
+# ОСНОВНОЙ КОД ВКЛАДКИ 3
+# -----------------------------------------------------------------------------
+with main_tab3:
+    # 1. Загрузка актуальных данных
     tasks_df = load_tasks_data()
 
-    # --- 2. ДИАЛОГ РЕДАКТИРОВАНИЯ ---
-    @st.dialog("✏️ Карточка задачи")
+    # 2. Модальное окно (Диалог карточки)
+    @st.dialog("📋 Карточка задачи")
     def open_task_card_dialog(task_id):
         df_current = load_tasks_data()
         task_row = df_current[df_current['ID'] == str(task_id)]
@@ -1823,10 +1855,10 @@ with main_tab3:
                 edit_status = st.selectbox("Статус:", st_options, index=st_index)
 
             edit_executors = st.text_input("Исполнители *", value=row['Исполнители'])
-            edit_desc = st.text_area("Описание задачи", value=row['Описание'], height=110)
+            edit_desc = st.text_area("Описание задачи", value=row['Описание'], height=120)
 
-            if row['Изображения Base64']:
-                st.image(row['Изображения Base64'], width=180)
+            if row.get('Изображения Base64'):
+                st.image(row['Изображения Base64'], width=200)
 
             uploaded_img = st.file_uploader("Прикрепить / заменить фото", type=['png', 'jpg', 'jpeg', 'webp'])
 
@@ -1841,7 +1873,7 @@ with main_tab3:
                     st.warning("Заполните обязательные поля!")
                 else:
                     now_str = datetime.datetime.now().strftime('%d.%m.%Y %H:%M')
-                    img_b64 = row['Изображения Base64']
+                    img_b64 = row.get('Изображения Base64', '')
                     
                     if uploaded_img is not None:
                         bytes_data = uploaded_img.getvalue()
@@ -1868,82 +1900,71 @@ with main_tab3:
                     st.success("Удалено!")
                     st.rerun()
 
-    # --- 3. ШАПКА И СОЗДАНИЕ ---
-    col_head1, col_head2 = st.columns([3, 1])
-    with col_head1:
+    # 3. Верхняя панель управления
+    col_h1, col_h2 = st.columns([3, 1])
+    with col_h1:
         st.subheader("🎯 Доска задач")
-    with col_head2:
+    with col_h2:
         if st.button("➕ Новая задача", type="primary", use_container_width=True):
             modal_add_task()
 
     st.write("")
 
-    # --- 4. РАЗБИЕНИЕ НА 3 РАВНЫЕ КОЛОНКИ ---
-    col_new, col_in_prog, col_done = st.columns([1, 1, 1])
+    # 4. Сетка из 3 равных столбцов
+    col_todo, col_in_prog, col_done = st.columns([1, 1, 1], gap="medium")
 
-    columns_map = {
-        "Новая": (col_new, "🆕 Новые"),
-        "В работе": (col_in_prog, "⚙️ В работе"),
-        "Завершена": (col_done, "✅ Завершенные")
-    }
+    columns_config = [
+        (col_todo, "🆕 TO DO", ["новая"]),
+        (col_in_prog, "⚙️ IN PROGRESS", ["в работе", "работа"]),
+        (col_done, "✅ DONE", ["завершена", "готово", "выполнено"])
+    ]
 
-    # Отрисовка заголовков колонок
-    for status_key, (col_obj, title_text) in columns_map.items():
+    # 5. Отрисовка колонок и квадратных карточек
+    for col_obj, header_text, status_keys in columns_config:
         with col_obj:
-            st.markdown(f'<div class="column-header">{title_text}</div>', unsafe_allow_html=True)
-
-    # Заполнение карточками
-    if not tasks_df.empty:
-        for _, row in tasks_df.iterrows():
-            t_id = str(row.get("ID", ""))
-            t_status = str(row.get("Статус", "Новая")).strip()
+            st.markdown(f'<div class="kanban-col-header">{header_text}</div>', unsafe_allow_html=True)
             
-            # Определение целевой колонки
-            if "работ" in t_status.lower():
-                target_col, _ = columns_map["В работе"]
-            elif "заверш" in t_status.lower() or "выполн" in t_status.lower():
-                target_col, _ = columns_map["Завершена"]
+            if not tasks_df.empty:
+                col_tasks = tasks_df[tasks_df['Статус'].str.lower().apply(
+                    lambda x: any(k in str(x) for k in status_keys)
+                )]
+                
+                # Нераспознанные статусы отправляем в TO DO
+                if header_text == "🆕 TO DO":
+                    unmatched_tasks = tasks_df[~tasks_df['Статус'].str.lower().apply(
+                        lambda x: any(k in str(x) for k in ["в работе", "работа", "завершена", "готово", "выполнено"])
+                    )]
+                    col_tasks = pd.concat([col_tasks, unmatched_tasks]).drop_duplicates(subset=['ID'])
+
+                for _, row in col_tasks.iterrows():
+                    t_id = str(row['ID'])
+                    t_title = row.get('Тема', 'Без темы')
+                    t_exec = row.get('Исполнители', '—')
+                    t_urgency = row.get('Срочность', 'Текущая задача')
+
+                    urgency_html = (
+                        '<span class="card-badge-urgent">🔥 СРОЧНО</span>' 
+                        if t_urgency == "Срочно" 
+                        else '<span class="card-badge-normal">📋 ОБЫЧНАЯ</span>'
+                    )
+
+                    # Единый квадратный контейнер карточки
+                    with st.container(border=True):
+                        st.markdown(f"""
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <span style="font-size: 11px; font-weight: 700; color: #94a3b8;">KB-{t_id}</span>
+                                {urgency_html}
+                            </div>
+                            <div class="card-task-title">{t_title}</div>
+                            <div class="card-executor">👤 {t_exec}</div>
+                        """, unsafe_allow_html=True)
+                        
+                        # Кнопка открытия располагается внутри той же карточки
+                        if st.button("📂 Открыть", key=f"btn_open_{t_id}", use_container_width=True):
+                            open_task_card_dialog(t_id)
             else:
-                target_col, _ = columns_map["Новая"]
+                st.caption("Нет задач")
 
-            t_title = row.get("Тема", "Без темы")
-            t_desc = row.get("Описание", "")
-            t_execs = row.get("Исполнители", "Не указан")
-            t_urgency = row.get("Срочность", "Текущая задача")
-            t_date = row.get("Дата создания", "")
-
-            urgency_html = (
-                '<span class="badge-urgent">🔥 Срочно</span>' 
-                if t_urgency == "Срочно" 
-                else '<span class="badge-normal">📋 Обычная</span>'
-            )
-
-            desc_html = f'<div class="card-desc">{t_desc}</div>' if t_desc else ''
-
-            card_html = f"""
-            <div class="kanban-card">
-                <div class="card-header">
-                    <span>TASK-{t_id}</span>
-                    <span>{t_date}</span>
-                </div>
-                <div class="card-title">{t_title}</div>
-                {desc_html}
-                <div class="card-meta">
-                    {urgency_html}
-                </div>
-                <div class="card-footer">
-                    <span class="executor-tag">👤 {t_execs}</span>
-                </div>
-            </div>
-            """
-
-            with target_col:
-                st.markdown(card_html, unsafe_allow_html=True)
-                if st.button(f"✏️ Открыть #{t_id}", key=f"btn_open_{t_id}", use_container_width=True):
-                    open_task_card_dialog(t_id)
-                st.write("")
-    else:
-        st.info("Задач пока нет.")
 # ==========================================
 # ВКЛАДКА 2: ОТКРЫТИЕ ГРУПП
 # ==========================================
