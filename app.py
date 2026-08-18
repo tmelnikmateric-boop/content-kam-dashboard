@@ -1134,64 +1134,123 @@ def modal_contacts():
     st.info('Контакты пока не добавлены.')
 
 
-@st.dialog('📦 Новые товары (Еженедельная загрузка)')
+@st.dialog('📦 Новые товары')
 def modal_new_products():
-  st.markdown("<h4 style='font-weight: 500; font-size: 1.05rem; margin-top: 5px; margin-bottom: 12px;'>📥 Загрузить файлы (пакетно)</h4>", unsafe_allow_html=True)
+  tab_upload, tab_view, tab_summary = st.tabs([
+      '📥 Загрузить партии из Excel',
+      '📋 Просмотр загруженных партий',
+      '📊 Сводная (Менеджер + Группа)',
+  ])
 
-  uploaded_files = st.file_uploader(
-      'Выберите .xlsx / .xls файлы',
-      type=['xlsx', 'xls'],
-      accept_multiple_files=True,
-      key='new_prod_file',
-  )
-
-  if uploaded_files:
-    if st.button(f'🚀 Добавить выгрузки в таблицу ({len(uploaded_files)})', use_container_width=True):
-      progress_bar = st.progress(0)
-      status_text = st.empty()
-      try:
-        if append_new_products_batch(uploaded_files, progress_bar, status_text):
-          status_text.success(f'Успешно добавлено файлов: {len(uploaded_files)}!')
-          st.rerun()
-      except Exception as e:
-        status_text.empty()
-        progress_bar.empty()
-        st.error(f'Ошибка обработки файлов: {e}')
-
-  st.divider()
-
-  st.markdown("<h4 style='font-weight: 500; font-size: 1.05rem; margin-bottom: 12px;'>📋 Реестр выгрузок по датам</h4>", unsafe_allow_html=True)
-
-  batches = parse_new_products_by_batches()
-
-  if batches:
-    dates_list = list(batches.keys())
-    dates_list.reverse()
-
-    selected_date = st.selectbox('📅 Выберите дату загрузки:', options=dates_list, key='select_batch_date')
-    selected_df = batches[selected_date]
-
-    st.caption(f'Всего товаров в выгрузке: **{len(selected_df)}** | Кликните по заголовку любого столбца для сортировки')
-
-    np_column_config = {
-        'Внешний код': st.column_config.TextColumn('Внешний код', width='small'),
-        'Наименование': st.column_config.TextColumn('Наименование', width='large'),
-        'Дата создания': st.column_config.TextColumn('Дата создания', width='small'),
-        'Цифровой код менеджера': st.column_config.TextColumn('Код менеджера', width='small'),
-        'Название раздела': st.column_config.TextColumn('Название раздела', width='medium'),
-        'Менеджер': st.column_config.TextColumn('Менеджер', width='medium'),
-        'Контент': st.column_config.TextColumn('Контент', width='small'),
-    }
-
-    st.dataframe(
-        selected_df,
-        use_container_width=True,
-        hide_index=True,
-        column_config=np_column_config,
-        height=450,
+  # Вкладка 1: Загрузка
+  with tab_upload:
+    st.subheader('Загрузка Excel-файлов')
+    uploaded_files = st.file_uploader(
+        'Выберите один или несколько Excel файлов:',
+        type=['xlsx', 'xls'],
+        accept_multiple_files=True,
     )
-  else:
-    st.info('Данные по новым товарам пока отсутствуют.')
+
+    if uploaded_files:
+      st.info(f'Выбрано файлов: {len(uploaded_files)}')
+      if st.button('💾 Добавить товары в таблицу', type='primary'):
+        prog_bar = st.progress(0)
+        stat_text = st.empty()
+
+        success = append_new_products_batch(
+            uploaded_files, prog_bar, stat_text
+        )
+        if success:
+          stat_text.empty()
+          prog_bar.empty()
+          st.success('Все партии успешно добавлены в лист "Новые товары"!')
+          st.rerun()
+
+  # Вкладка 2: Просмотр партий
+  with tab_view:
+    batches = parse_new_products_by_batches()
+    if not batches:
+      st.info('Нет загруженных партий новых товаров.')
+    else:
+      selected_batch_date = st.selectbox(
+          'Выберите партию для просмотра:', options=list(batches.keys())
+      )
+      if selected_batch_date:
+        batch_df = batches[selected_batch_date]
+        st.write(f'Всего SKU в партии: **{len(batch_df)}**')
+        st.dataframe(batch_df, use_container_width=True, hide_index=True)
+
+  # Вкладка 3: Сводная таблица по Дате / Менеджеру / Группе
+  with tab_summary:
+    st.subheader('📊 Сводная отчетность: Менеджер + Группа')
+
+    batches = parse_new_products_by_batches()
+
+    if not batches:
+      st.info('Нет данных для формирования сводной таблицы.')
+    else:
+      # Фильтр по дате загрузки
+      date_options = ['Все даты'] + list(batches.keys())
+      selected_date = st.selectbox(
+          '📅 Выберите дату загрузки файла:', options=date_options
+      )
+
+      # Собираем данные в один DataFrame
+      if selected_date == 'Все даты':
+        combined_dfs = []
+        for b_date, b_df in batches.items():
+          temp_df = b_df.copy()
+          temp_df['Дата загрузки'] = b_date
+          combined_dfs.append(temp_df)
+        target_df = pd.concat(combined_dfs, ignore_index=True)
+      else:
+        target_df = batches[selected_date].copy()
+        target_df['Дата загрузки'] = selected_date
+
+      # Проверяем наличие колонок и очищаем от пустых значений
+      mng_col = 'Менеджер'
+      grp_col = 'Название раздела'
+
+      target_df[mng_col] = (
+          target_df[mng_col].replace('', 'Не указан').fillna('Не указан')
+      )
+      target_df[grp_col] = (
+          target_df[grp_col].replace('', 'Без группы').fillna('Без группы')
+      )
+
+      if not target_df.empty:
+        # 1. Сводная Pivot-таблица (Менеджер x Группа)
+        summary_pivot = pd.pivot_table(
+            target_df,
+            index=[mng_col, grp_col],
+            values='Внешний код',
+            aggfunc='count',
+            fill_value=0,
+        ).reset_index()
+
+        summary_pivot.columns = [
+            'Менеджер',
+            'Группа (Раздел)',
+            'Количество SKU',
+        ]
+
+        # Подсчет итогов
+        total_sku = summary_pivot['Количество SKU'].sum()
+        unique_mngs = summary_pivot['Менеджер'].nunique()
+        unique_grps = summary_pivot['Группа (Раздел)'].nunique()
+
+        # Вывод ключевых показателей
+        m1, m2, m3 = st.columns(3)
+        m1.metric('Всего SKU', f'{total_sku} шт.')
+        m2.metric('Менеджеров', f'{unique_mngs}')
+        m3.metric('Групп товаров', f'{unique_grps}')
+
+        st.markdown('---')
+
+        # Вывод сводной таблицы
+        st.dataframe(summary_pivot, use_container_width=True, hide_index=True)
+      else:
+        st.warning('За выбранную дату нет записей.')
 
 
 @st.dialog('➕ Создать новую задачу')
