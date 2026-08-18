@@ -1678,78 +1678,121 @@ st.link_button(
 # ВКЛАДКА 3: ЗАДАЧИ
 # ------------------------------------------
 
+import streamlit as st
+from streamlit_sortables import sort_items
+import uuid
+
 # --- ИНИЦИАЛИЗАЦИЯ СОСТОЯНИЯ ---
-if "tasks" not in st.session_state:
-    st.session_state.tasks = {
-        "Новая": ["📌 Дизайн главной", "📌 ТЗ для копирайтера"],
-        "В работе": ["⚡ Верстка карточек", "⚡ Настройка SEO"],
-        "Завершена": ["✅ Анализ конкурентов"]
+if "tasks_db" not in st.session_state:
+    # База данных задач (по ID)
+    st.session_state.tasks_db = {
+        "1": {"title": "Дизайн главной", "desc": "Подготовить макеты для десктопа и мобилки", "status": "Новая"},
+        "2": {"title": "Верстка карточек", "desc": "Сверстать сетку товаров на Flexbox", "status": "В работе"},
+        "3": {"title": "Анализ конкурентов", "desc": "Собрать референсы по сайтам одежды", "status": "Завершена"}
     }
 
-# --- ПОЛЬЗОВАТЕЛЬСКИЕ СТИЛИ ДЛЯ СТИКЕРОВ ---
+if "editing_task_id" not in st.session_state:
+    st.session_state.editing_task_id = None
+
+# --- МОДАЛЬНОЕ ОКНО РЕДАКТИРОВАНИЯ И ПРОСМОТРА ---
+@st.dialog("📌 Карточка задачи")
+def open_task_dialog(task_id):
+    task = st.session_state.tasks_db[task_id]
+    
+    # Поля редактирования
+    new_title = st.text_input("Название задачи", value=task["title"])
+    new_desc = st.text_area("Описание / Детали", value=task["desc"], height=120)
+    new_status = st.selectbox("Статус", ["Новая", "В работе", "Завершена"], index=["Новая", "В работе", "Завершена"].index(task["status"]))
+    
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
+        if st.button("💾 Сохранить", use_container_width=True, type="primary"):
+            st.session_state.tasks_db[task_id]["title"] = new_title
+            st.session_state.tasks_db[task_id]["desc"] = new_desc
+            st.session_state.tasks_db[task_id]["status"] = new_status
+            st.session_state.editing_task_id = None
+            st.rerun()
+            
+    with col2:
+        if st.button("🗑 Удалить", use_container_width=True):
+            del st.session_state.tasks_db[task_id]
+            st.session_state.editing_task_id = None
+            st.rerun()
+
+# --- СТИЛИ КАНБАНА ---
 st.markdown("""
 <style>
-    /* Стиль колонок канбана */
-    .sortable-container {
-        background-color: #f4f5f7;
-        border-radius: 8px;
-        padding: 12px;
-    }
-    
-    /* Стиль стикеров (карточек) */
     .sortable-item {
-        background-color: #fff9c4 !important; /* Желтый цвет стикера */
+        background-color: #fff9c4 !important;
         color: #333333 !important;
-        font-weight: 500 !important;
+        font-weight: 600 !important;
         border-left: 5px solid #fbc02d !important;
         border-radius: 6px !important;
         padding: 10px 14px !important;
         margin-bottom: 8px !important;
         box-shadow: 2px 2px 5px rgba(0,0,0,0.1) !important;
-        cursor: grab !important;
-    }
-    
-    .sortable-item:active {
-        cursor: grabbing !important;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# --- ИНТЕРФЕЙС ВКЛАДКИ ---
 st.title("📋 Канбан-доска задач")
 
-# Форма добавления новой задачи
-with st.expander("➕ Добавить новую задачу"):
-    with st.form("add_task_form", clear_on_submit=True):
-        new_task_title = st.text_input("Название задачи")
-        submitted = st.form_submit_button("Создать стикер")
-        
-        if submitted and new_task_title.strip():
-            st.session_state.tasks["Новая"].append(f"📌 {new_task_title.strip()}")
+# --- ФОРМА СОЗДАНИЯ ---
+with st.expander("➕ Создать новую задачу"):
+    with st.form("new_task", clear_on_submit=True):
+        t_title = st.text_input("Заголовок")
+        t_desc = st.text_area("Описание")
+        if st.form_submit_button("Создать стикер") and t_title.strip():
+            new_id = str(uuid.uuid4())[:8]
+            st.session_state.tasks_db[new_id] = {
+                "title": t_title.strip(),
+                "desc": t_desc.strip(),
+                "status": "Новая"
+            }
             st.rerun()
 
-# --- КАНБАН ДОСКА (DRAG & DROP) ---
-# Формируем структуру данных для компонента
-original_structure = [
-    {"header": "🆕 Новая", "items": st.session_state.tasks["Новая"]},
-    {"header": "⚙️ В работе", "items": st.session_state.tasks["В работе"]},
-    {"header": "✅ Завершена", "items": st.session_state.tasks["Завершена"]}
+# --- ПОДГОТОВКА СТРУКТУРЫ ДЛЯ СОРТИРОВКИ ---
+# Формируем списки лейблов виджета вида "ID | Название"
+kanban_data = {"Новая": [], "В работе": [], "Завершена": []}
+for t_id, t_info in st.session_state.tasks_db.items():
+    kanban_data[t_info["status"]].append(f"#{t_id} | {t_info['title']}")
+
+structure = [
+    {"header": "🆕 Новая", "items": kanban_data["Новая"]},
+    {"header": "⚙️ В работе", "items": kanban_data["В работе"]},
+    {"header": "✅ Завершена", "items": kanban_data["Завершена"]}
 ]
 
-# Отображаем интерактивные колонки
-sorted_structure = sort_items(
-    original_structure,
-    multi_containers=True,
-    direction="vertical",
-    key="kanban_board"
-)
+# --- ОТОБРАЖЕНИЕ КАНБАНА ---
+sorted_res = sort_items(structure, multi_containers=True, direction="vertical", key="kanban_main")
 
-# Синхронизируем изменения после перетягивания
-if sorted_structure:
-    st.session_state.tasks["Новая"] = sorted_structure[0]["items"]
-    st.session_state.tasks["В работе"] = sorted_structure[1]["items"]
-    st.session_state.tasks["Завершена"] = sorted_structure[2]["items"]
+# Синхронизация статусов после Drag-and-Drop
+if sorted_res:
+    status_map = {0: "Новая", 1: "В работе", 2: "Завершена"}
+    for idx, col in enumerate(sorted_res):
+        target_status = status_map[idx]
+        for item in col["items"]:
+            task_id = item.split(" | ")[0].replace("#", "")
+            if task_id in st.session_state.tasks_db:
+                st.session_state.tasks_db[task_id]["status"] = target_status
 
+# --- ПАНЕЛЬ УПРАВЛЕНИЯ КАРТОЧКАМИ (КЛИК ДЛЯ РЕДАКТИРОВАНИЯ/ПРОСМОТРА) ---
+st.divider()
+st.subheader("🔍 Действия с задачами")
+
+all_tasks = st.session_state.tasks_db
+if all_tasks:
+    selected_task_label = st.selectbox(
+        "Выберите задачу для просмотра или редактирования:",
+        options=list(all_tasks.keys()),
+        format_func=lambda x: f"#{x} - {all_tasks[x]['title']} ({all_tasks[x]['status']})"
+    )
+    
+    if st.button("✏️ Открыть карточку задачи"):
+        open_task_dialog(selected_task_label)
+else:
+    st.info("Задач пока нет. Создайте первую выше!")
 # ==========================================
 # ВКЛАДКА 2: ОТКРЫТИЕ ГРУПП
 # ==========================================
