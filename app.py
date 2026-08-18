@@ -1699,252 +1699,88 @@ st.link_button(
     use_container_width=False,
 )
 
-# ------------------------------------------
-# ВКЛАДКА 3: ЗАДАЧИ (UI В СТИЛЕ СКИЗУ/РЕФЕРЕНСА)
-# ------------------------------------------
-with main_tab3:
-    # --- CSS СТИЛИ ДЛЯ КАРТОЧЕК ---
+# --- СТИЛИ ДЛЯ ВСТРОЕННОЙ КНОПКИ НА КАРТОЧКЕ ---
     st.markdown("""
         <style>
-        .kanban-card {
-            background-color: #ffffff;
-            border-radius: 12px;
-            padding: 16px;
-            margin-bottom: 14px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-            border: 1px solid #eef2f6;
-            font-family: system-ui, -apple-system, sans-serif;
+        /* Стилизация контейнера карточки */
+        div[data-testid="stVerticalBlockBorderWrapper"] {
+            background: #ffffff !important;
+            border-radius: 12px !important;
+            border: 1px solid #eef2f6 !important;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04) !important;
+            padding: 14px !important;
+            transition: all 0.2s ease !important;
         }
-        .card-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 11px;
-            color: #8c98a4;
-            margin-bottom: 6px;
-            font-weight: 600;
+        div[data-testid="stVerticalBlockBorderWrapper"]:hover {
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08) !important;
+            border-color: #cbd5e1 !important;
         }
-        .card-title {
-            font-size: 15px;
-            font-weight: 700;
-            color: #1e293b;
-            margin-bottom: 8px;
-            line-height: 1.3;
+
+        /* Кнопка "Открыть", встроенная прямо в нижнюю часть карточки */
+        div[data-testid="stVerticalBlockBorderWrapper"] button {
+            background-color: #f8fafc !important;
+            color: #334155 !important;
+            border: 1px solid #e2e8f0 !important;
+            border-radius: 8px !important;
+            font-size: 12px !important;
+            font-weight: 600 !important;
+            margin-top: 10px !important;
+            transition: all 0.15s ease !important;
         }
-        .card-desc {
-            font-size: 12px;
-            color: #64748b;
-            margin-bottom: 12px;
-            display: -webkit-box;
-            -webkit-line-clamp: 2;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
-        }
-        .card-meta {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 12px;
-            margin-bottom: 10px;
-        }
-        .badge-urgent {
-            background-color: #fef2f2;
-            color: #dc2626;
-            padding: 2px 8px;
-            border-radius: 6px;
-            font-weight: 600;
-            font-size: 11px;
-        }
-        .badge-normal {
-            background-color: #f1f5f9;
-            color: #475569;
-            padding: 2px 8px;
-            border-radius: 6px;
-            font-weight: 500;
-            font-size: 11px;
-        }
-        .card-footer {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding-top: 8px;
-            border-top: 1px solid #f1f5f9;
-            font-size: 12px;
-            color: #475569;
-        }
-        .executor-tag {
-            background: #f8fafc;
-            border: 1px solid #e2e8f0;
-            padding: 3px 8px;
-            border-radius: 20px;
-            font-size: 11px;
-            font-weight: 500;
-        }
-        .column-header {
-            background: #f1f5f9;
-            padding: 10px 14px;
-            border-radius: 8px;
-            font-weight: 700;
-            font-size: 14px;
-            color: #334155;
-            margin-bottom: 12px;
-            text-align: center;
+        div[data-testid="stVerticalBlockBorderWrapper"] button:hover {
+            background-color: #3b82f6 !important;
+            color: #ffffff !important;
+            border-color: #3b82f6 !important;
         }
         </style>
     """, unsafe_allow_html=True)
 
-    # --- 1. ЗАГРУЗКА ДАННЫХ ИЗ GOOGLE SHEETS ---
-    tasks_df = load_tasks_data()
-
-    # --- 2. ДИАЛОГ РЕДАКТИРОВАНИЯ ---
-    @st.dialog("✏️ Карточка задачи")
-    def open_task_card_dialog(task_id):
-        df_current = load_tasks_data()
-        task_row = df_current[df_current['ID'] == str(task_id)]
-        
-        if task_row.empty:
-            st.error("Задача не найдена!")
-            st.rerun()
-            return
-
-        row = task_row.iloc[0]
-
-        with st.form(f"dialog_task_form_{task_id}"):
-            edit_title = st.text_input("Тема задачи *", value=row['Тема'])
-
-            col1, col2 = st.columns(2)
-            with col1:
-                urg_options = ['Текущая задача', 'Срочно']
-                urg_index = urg_options.index(row['Срочность']) if row['Срочность'] in urg_options else 0
-                edit_urgency = st.selectbox("Срочность:", urg_options, index=urg_index)
-            with col2:
-                st_options = ['Новая', 'В работе', 'Завершена']
-                st_index = st_options.index(row['Статус']) if row['Статус'] in st_options else 0
-                edit_status = st.selectbox("Статус:", st_options, index=st_index)
-
-            edit_executors = st.text_input("Исполнители *", value=row['Исполнители'])
-            edit_desc = st.text_area("Описание задачи", value=row['Описание'], height=110)
-
-            if row['Изображения Base64']:
-                st.image(row['Изображения Base64'], width=180)
-
-            uploaded_img = st.file_uploader("Прикрепить / заменить фото", type=['png', 'jpg', 'jpeg', 'webp'])
-
-            btn_save, btn_del = st.columns([1, 1])
-            with btn_save:
-                submitted = st.form_submit_button("💾 Сохранить", use_container_width=True, type="primary")
-            with btn_del:
-                deleted = st.form_submit_button("🗑 Удалить", use_container_width=True)
-
-            if submitted:
-                if not edit_title.strip() or not edit_executors.strip():
-                    st.warning("Заполните обязательные поля!")
-                else:
-                    now_str = datetime.datetime.now().strftime('%d.%m.%Y %H:%M')
-                    img_b64 = row['Изображения Base64']
-                    
-                    if uploaded_img is not None:
-                        bytes_data = uploaded_img.getvalue()
-                        b64_str = base64.b64encode(bytes_data).decode('utf-8')
-                        img_b64 = f"data:{uploaded_img.type};base64,{b64_str}"
-
-                    mask = df_current['ID'] == str(task_id)
-                    df_current.loc[mask, 'Тема'] = edit_title.strip()
-                    df_current.loc[mask, 'Описание'] = edit_desc.strip()
-                    df_current.loc[mask, 'Исполнители'] = edit_executors.strip()
-                    df_current.loc[mask, 'Статус'] = edit_status
-                    df_current.loc[mask, 'Срочность'] = edit_urgency
-                    df_current.loc[mask, 'Изображения Base64'] = img_b64
-                    df_current.loc[mask, 'Дата обновления'] = now_str
-
-                    if save_all_tasks(df_current):
-                        st.success("Сохранено!")
-                        st.rerun()
-
-            if deleted:
-                df_updated = df_current[df_current['ID'] != str(task_id)].copy()
-                df_updated['ID'] = [str(i + 1) for i in range(len(df_updated))]
-                if save_all_tasks(df_updated):
-                    st.success("Удалено!")
-                    st.rerun()
-
-    # --- 3. ШАПКА И СОЗДАНИЕ ---
-    col_head1, col_head2 = st.columns([3, 1])
-    with col_head1:
-        st.subheader("🎯 Доска задач")
-    with col_head2:
-        if st.button("➕ Новая задача", type="primary", use_container_width=True):
-            modal_add_task()
-
-    st.write("")
-
-    # --- 4. РАЗБИЕНИЕ НА 3 РАВНЫЕ КОЛОНКИ ---
-    col_new, col_in_prog, col_done = st.columns([1, 1, 1])
-
-    columns_map = {
-        "Новая": (col_new, "🆕 Новые"),
-        "В работе": (col_in_prog, "⚙️ В работе"),
-        "Завершена": (col_done, "✅ Завершенные")
-    }
-
-    # Отрисовка заголовков колонок
-    for status_key, (col_obj, title_text) in columns_map.items():
+    # --- ОТОБРАЖЕНИЕ КАРТОЧЕК В КОЛОНКАХ ---
+    for col_obj, header_text, status_keys in columns_config:
         with col_obj:
-            st.markdown(f'<div class="column-header">{title_text}</div>', unsafe_allow_html=True)
-
-    # Заполнение карточками
-    if not tasks_df.empty:
-        for _, row in tasks_df.iterrows():
-            t_id = str(row.get("ID", ""))
-            t_status = str(row.get("Статус", "Новая")).strip()
+            st.markdown(f'<div class="kanban-col-header">{header_text}</div>', unsafe_allow_html=True)
             
-            # Определение целевой колонки
-            if "работ" in t_status.lower():
-                target_col, _ = columns_map["В работе"]
-            elif "заверш" in t_status.lower() or "выполн" in t_status.lower():
-                target_col, _ = columns_map["Завершена"]
+            if not tasks_df.empty:
+                col_tasks = tasks_df[tasks_df['Статус'].str.lower().apply(
+                    lambda x: any(k in str(x) for k in status_keys)
+                )]
+                
+                if header_text == "🆕 TO DO":
+                    unmatched_tasks = tasks_df[~tasks_df['Статус'].str.lower().apply(
+                        lambda x: any(k in str(x) for k in ["в работе", "работа", "завершена", "готово", "выполнено"])
+                    )]
+                    col_tasks = pd.concat([col_tasks, unmatched_tasks]).drop_duplicates(subset=['ID'])
+
+                for _, row in col_tasks.iterrows():
+                    t_id = str(row['ID'])
+                    t_title = row.get('Тема', 'Без темы')
+                    t_exec = row.get('Исполнители', '—')
+                    t_urgency = row.get('Срочность', 'Текущая задача')
+
+                    urgency_html = (
+                        '<span class="card-badge-urgent">🔥 Срочно</span>' 
+                        if t_urgency == "Срочно" 
+                        else '<span class="card-badge-normal">📋 Обычная</span>'
+                    )
+
+                    # Карточка и кнопка находятся ВНУТРИ единого контейнера
+                    with st.container(border=True):
+                        st.markdown(f"""
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                <span style="font-size: 11px; font-weight: 700; color: #94a3b8;">KB-{t_id}</span>
+                                {urgency_html}
+                            </div>
+                            <div class="card-task-title">{t_title}</div>
+                            <div class="card-executor" style="margin-top: 8px;">👤 {t_exec}</div>
+                        """, unsafe_allow_html=True)
+                        
+                        # Нативная кнопка открытия прямо на базе тела карточки
+                        if st.button("📂 Открыть карточку", key=f"btn_card_open_{t_id}", use_container_width=True):
+                            open_task_card_dialog(t_id)
             else:
-                target_col, _ = columns_map["Новая"]
-
-            t_title = row.get("Тема", "Без темы")
-            t_desc = row.get("Описание", "")
-            t_execs = row.get("Исполнители", "Не указан")
-            t_urgency = row.get("Срочность", "Текущая задача")
-            t_date = row.get("Дата создания", "")
-
-            urgency_html = (
-                '<span class="badge-urgent">🔥 Срочно</span>' 
-                if t_urgency == "Срочно" 
-                else '<span class="badge-normal">📋 Обычная</span>'
-            )
-
-            desc_html = f'<div class="card-desc">{t_desc}</div>' if t_desc else ''
-
-            card_html = f"""
-            <div class="kanban-card">
-                <div class="card-header">
-                    <span>TASK-{t_id}</span>
-                    <span>{t_date}</span>
-                </div>
-                <div class="card-title">{t_title}</div>
-                {desc_html}
-                <div class="card-meta">
-                    {urgency_html}
-                </div>
-                <div class="card-footer">
-                    <span class="executor-tag">👤 {t_execs}</span>
-                </div>
-            </div>
-            """
-
-            with target_col:
-                st.markdown(card_html, unsafe_allow_html=True)
-                if st.button(f"✏️ Открыть #{t_id}", key=f"btn_open_{t_id}", use_container_width=True):
-                    open_task_card_dialog(t_id)
-                st.write("")
-    else:
-        st.info("Задач пока нет.")
-# ==========================================
+                st.caption("Нет задач")
+                
+# ==========================================                
 # ВКЛАДКА 2: ОТКРЫТИЕ ГРУПП
 # ==========================================
 
