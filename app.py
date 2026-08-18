@@ -1768,16 +1768,16 @@ for t_id, t_info in st.session_state.tasks_db.items():
     if st_status not in kanban_data:
         st_status = "Новая"
         
-    executor_label = f"👤 {t_info['executor']}" if t_info.get("executor") != "Не назначен" else "👤 Без исполнителя"
-    # Формат стикера: #ID | Название | [Исполнитель]
-    card_text = f"#{t_id} | {t_info['title']} ({executor_label})"
-    kanban_data[st_status].append(card_text)
+    # Безопасное извлечение исполнителя без риска KeyError
+    executor_name = t_info.get("executor", "Не назначен")
+    if executor_name and executor_name != "Не назначен":
+        executor_label = f"👤 {executor_name}"
+    else:
+        executor_label = "👤 Без исполнителя"
 
-structure = [
-    {"header": "🆕 Новая", "items": kanban_data["Новая"]},
-    {"header": "⚙️ В работе", "items": kanban_data["В работе"]},
-    {"header": "✅ Завершена", "items": kanban_data["Завершена"]}
-]
+    # Формат стикера: #ID | Название (👤 Исполнитель)
+    card_text = f"#{t_id} | {t_info.get('title', 'Без названия')} ({executor_label})"
+    kanban_data[st_status].append(card_text)
 
 # --- 5. ОТОБРАЖЕНИЕ КАНБАН-ДОСКИ ---
 sorted_res = sort_items(
