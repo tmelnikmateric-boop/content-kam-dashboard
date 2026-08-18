@@ -1675,49 +1675,65 @@ st.link_button(
 )
 
 # ------------------------------------------
-# ВКЛАДКА 3: ЗАДАЧИ (КАНБАН С DRAG-AND-DROP И КЛИКОМ)
+# ВКЛАДКА 3: ЗАДАЧИ (КРАСИВЫЕ КАРТОЧКИ + DRAG-AND-DROP + КЛИК)
 # ------------------------------------------
 with main_tab3:
-    # --- CSS СТИЛИ ДЛЯ DRAG-AND-DROP КАРТОЧЕК ---
+    # --- СУПЕР-СТИЛИЗАЦИЯ SORTABLES ПОД РЕФЕРЕНС ---
     st.markdown("""
         <style>
-        /* Стилизация контейнера sortables под красивую карточку */
-        ul[data-testid="stSortableList"] > li {
-            background-color: #ffffff !important;
-            border-radius: 12px !important;
-            padding: 14px 16px !important;
-            margin-bottom: 12px !important;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05) !important;
-            border: 1px solid #eef2f6 !important;
-            font-family: system-ui, -apple-system, sans-serif !important;
-            color: #1e293b !important;
-            cursor: grab !important;
-            transition: all 0.2s ease !important;
+        /* Ограничение ширины и сетка для контейнера Sortables */
+        div[data-testid="stHorizontalBlock"] {
+            gap: 16px !important;
         }
+        
+        /* Стилизация каждой карточки */
+        ul[data-testid="stSortableList"] {
+            padding: 4px !important;
+            background-color: #f8fafc !important;
+            border-radius: 12px !important;
+            min-height: 400px !important;
+            border: 1px dashed #cbd5e1 !important;
+        }
+
+        ul[data-testid="stSortableList"] > li {
+            background: #ffffff !important;
+            border-radius: 10px !important;
+            padding: 12px 14px !important;
+            margin-bottom: 10px !important;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04) !important;
+            border: 1px solid #e2e8f0 !important;
+            font-family: system-ui, -apple-system, sans-serif !important;
+            color: #0f172a !important;
+            cursor: grab !important;
+            transition: all 0.15s ease-in-out !important;
+        }
+
         ul[data-testid="stSortableList"] > li:hover {
-            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.09) !important;
-            border-color: #cbd5e1 !important;
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08) !important;
+            border-color: #3b82f6 !important;
             transform: translateY(-2px);
         }
-        /* Шапки колонок Канбана */
-        .kanban-col-header {
-            background: #f1f5f9;
-            padding: 10px 14px;
-            border-radius: 10px;
+
+        /* Заголовки колонок */
+        .kanban-header-box {
+            background-color: #f1f5f9;
+            padding: 8px 12px;
+            border-radius: 8px;
             font-weight: 700;
-            font-size: 14px;
-            color: #334155;
-            margin-bottom: 12px;
+            font-size: 13px;
+            color: #475569;
             text-align: center;
-            border: 1px solid #e2e8f0;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
         </style>
     """, unsafe_allow_html=True)
 
-    # --- 1. ЗАГРУЗКА ДАННЫХ ИЗ GOOGLE SHEETS ---
+    # --- 1. ЗАГРУЗКА ДАННЫХ ---
     tasks_df = load_tasks_data()
 
-    # --- 2. ВСПЛЫВАЮЩИЙ ДИАЛОГ КАРТОЧКИ ---
+    # --- 2. ВСПЛЫВАЮЩИЙ ДИАЛОГ ---
     @st.dialog("✏️ Карточка задачи")
     def open_task_card_dialog(task_id):
         df_current = load_tasks_data()
@@ -1799,7 +1815,7 @@ with main_tab3:
 
     st.write("")
 
-    # --- 4. ФОРМИРОВАНИЕ ДАННЫХ ДЛЯ КАНБАНА С DRAG-AND-DROP ---
+    # --- 4. ПОДГОТОВКА ДАННЫХ ---
     kanban_data = {"Новая": [], "В работе": [], "Завершена": []}
 
     if not tasks_df.empty:
@@ -1815,20 +1831,20 @@ with main_tab3:
                 norm_status = "Новая"
 
             t_title = row.get("Тема", "Без темы")
-            t_execs = row.get("Исполнители", "Не указан")
-            urgency_flag = "🔥 " if row.get("Срочность") == "Срочно" else "📋 "
+            t_execs = row.get("Исполнители", "—")
+            urg_icon = "🔥 " if row.get("Срочность") == "Срочно" else ""
 
-            # Форматируем текст карточки внутри drag-and-drop
-            card_text = f"#{t_id} | {urgency_flag}{t_title}  \n👤 {t_execs}"
+            # Лаконичное оформление строки карточки
+            card_text = f"#{t_id} | {urg_icon}{t_title} \n👤 {t_execs}"
             kanban_data[norm_status].append(card_text)
 
     structure = [
-        {"header": "🆕 Новые", "items": kanban_data["Новая"]},
-        {"header": "⚙️ В работе", "items": kanban_data["В работе"]},
-        {"header": "✅ Завершенные", "items": kanban_data["Завершена"]}
+        {"header": "🆕 TO DO", "items": kanban_data["Новая"]},
+        {"header": "⚙️ IN PROGRESS", "items": kanban_data["В работе"]},
+        {"header": "✅ DONE", "items": kanban_data["Завершена"]}
     ]
 
-    # --- 5. КАНБАН ДОСКА (3 КОЛОНКИ ДРАГ-Н-ДРОП) ---
+    # --- 5. DRAG-AND-DROP КАНБАН ---
     sorted_res = sort_items(
         structure, 
         multi_containers=True, 
@@ -1836,11 +1852,11 @@ with main_tab3:
         key=f"kanban_board_drag_{len(tasks_df)}"
     )
 
-    # --- 6. АВТОМАТИЧЕСКАЯ СИНХРОНИЗАЦИЯ ПРИ ПЕРЕТАСКИВАНИИ ---
+    # --- 6. АВТО-СОХРАНЕНИЕ СТАТУСОВ ПРИ ПЕРЕТАСКИВАНИИ ---
     status_mapping = {
-        "🆕 Новые": "Новая",
-        "⚙️ В работе": "В работе",
-        "✅ Завершенные": "Завершена"
+        "🆕 TO DO": "Новая",
+        "⚙️ IN PROGRESS": "В работе",
+        "✅ DONE": "Завершена"
     }
 
     if sorted_res:
@@ -1850,7 +1866,6 @@ with main_tab3:
             target_status = status_mapping.get(col_title)
             
             for item_text in container.get("items", []):
-                # Извлекаем ID задачи из строки формата "#1 | ..."
                 if item_text.startswith("#"):
                     extracted_id = item_text.split(" | ")[0].replace("#", "").strip()
                     
@@ -1866,20 +1881,19 @@ with main_tab3:
             save_all_tasks(tasks_df)
             st.rerun()
 
-    st.divider()
+    st.write("")
 
-    # --- 7. БЫСТРЫЙ ВЫБОР ДЛЯ ОТКРЫТИЯ КАРТОЧКИ ---
+    # --- 7. БЫСТРЫЙ КЛИК ПО ЗАДАЧЕ ДЛЯ РЕДАКТИРОВАНИЯ (БЕЗ НИЖНИХ СЕЛЕКТОВ) ---
+    st.markdown("**Быстрый просмотр / Редактирование карточки:**")
     if not tasks_df.empty:
-        selected_task_id = st.selectbox(
-            "👇 Выберите задачу из списка для просмотра или редактирования:",
-            options=tasks_df['ID'].tolist(),
-            format_func=lambda x: (
-                f"#{x} - {tasks_df[tasks_df['ID'] == x]['Тема'].values[0]} "
-                f"[{tasks_df[tasks_df['ID'] == x]['Статус'].values[0]}]"
-            )
-        )
-        if st.button("🔍 Открыть выбранную карточку", use_container_width=True, type="secondary"):
-            open_task_card_dialog(selected_task_id)
+        # Выводим компактные кнопочки прямо под канбаном в 3 колонки
+        cols_btn = st.columns(3)
+        for idx, row in tasks_df.iterrows():
+            t_id = row['ID']
+            col_idx = idx % 3
+            with cols_btn[col_idx]:
+                if st.button(f"✏️ #{t_id} {row['Тема'][:20]}...", key=f"quick_edit_{t_id}", use_container_width=True):
+                    open_task_card_dialog(t_id)
         
 # ==========================================
 # ВКЛАДКА 2: ОТКРЫТИЕ ГРУПП
