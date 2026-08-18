@@ -13,6 +13,14 @@ from streamlit_sortables import sort_items
 # 0. НАСТРОЙКА СТРАНИЦЫ И СТИЛЕЙ
 # ==========================================
 
+
+st.set_page_config(
+    page_title="Мое приложение",
+    page_icon="📋",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
 st.markdown("""
     <style>
     /* Переопределяем BlinkMacSystemFont и стандартный стек шрифтов Streamlit */
@@ -26,13 +34,6 @@ st.markdown("""
     }
     </style>
 """, unsafe_allow_html=True)
-
-st.set_page_config(
-    page_title="Мое приложение",
-    page_icon="📋",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
 
 st.markdown(
     """
