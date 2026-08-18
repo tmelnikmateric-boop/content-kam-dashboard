@@ -1461,6 +1461,46 @@ def modal_edit_task(task_row):
           st.success('Задача успешно обновлена!')
           st.rerun()
 
+def delete_task_file_by_name(file_name_to_delete):
+  """Удаляет из листа задач строки, соответствующие указанному имени файла."""
+  try:
+    gc = get_gspread_client()
+    sh = gc.open_by_url(SPREADSHEET_URL)
+    worksheet = sh.worksheet(TASKS_SHEET_NAME)
+
+    # Получаем все данные из таблицы
+    records = worksheet.get_all_records()
+    if not records:
+      return False
+
+    df = pd.DataFrame(records)
+
+    # Ищем колонку с именем файла
+    file_col = None
+    for col in df.columns:
+      if 'файл' in str(col).lower() or 'название' in str(col).lower():
+        file_col = col
+        break
+
+    if file_col:
+      # Фильтруем строки, оставляя только те, где имя файла не совпадает
+      initial_count = len(df)
+      df_filtered = df[
+          df[file_col].astype(str).str.strip() != str(file_name_to_delete).strip()
+      ]
+
+      if len(df_filtered) < initial_count:
+        # Перезаписываем лист без удаленных строк
+        worksheet.clear()
+        worksheet.append_row(df.columns.tolist())
+        if not df_filtered.empty:
+          worksheet.append_rows(df_filtered.values.tolist())
+        return True
+
+    return False
+  except Exception as e:
+    st.error(f'Ошибка при удалении файла задач: {e}')
+    return False
 
 # ==========================================
 # 5. ОСНОВНОЙ ИНТЕРФЕЙС STREAMLIT
@@ -1577,6 +1617,24 @@ with main_tab1:
 
       if btn_col4.button('✅ Завершить', use_container_width=True):
         modal_complete(dept_info, summary_df, df)
+
+    # НОВАЯ КНОПКА УДАЛЕНИЯ
+with col_act5:
+  if st.button('🗑️ Удалить', type='secondary', use_container_width=True):
+    if not selected_files_list:
+      st.warning('Выберите хотя бы один файл для удаления!')
+    else:
+      with st.spinner('Удаление выбранных файлов...'):
+        deleted_count = 0
+        for f_name in selected_files_list:
+          if delete_task_file_by_name(f_name):
+            deleted_count += 1
+
+        if deleted_count > 0:
+          st.success(f'Успешно удалено файлов: {deleted_count}')
+          st.rerun()
+        else:
+          st.error('Не удалось удалить выбранные файлы.')
 
     with col_extra:
       st.subheader('3. Дополнительная информация')
