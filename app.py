@@ -1768,16 +1768,21 @@ for t_id, t_info in st.session_state.tasks_db.items():
     if st_status not in kanban_data:
         st_status = "Новая"
         
-    # Безопасное извлечение исполнителя без риска KeyError
     executor_name = t_info.get("executor", "Не назначен")
     if executor_name and executor_name != "Не назначен":
         executor_label = f"👤 {executor_name}"
     else:
         executor_label = "👤 Без исполнителя"
 
-    # Формат стикера: #ID | Название (👤 Исполнитель)
     card_text = f"#{t_id} | {t_info.get('title', 'Без названия')} ({executor_label})"
     kanban_data[st_status].append(card_text)
+
+# ⚠️ Явное объявление структуры перед вызовом sort_items
+structure = [
+    {"header": "🆕 Новая", "items": kanban_data["Новая"]},
+    {"header": "⚙️ В работе", "items": kanban_data["В работе"]},
+    {"header": "✅ Завершена", "items": kanban_data["Завершена"]}
+]
 
 # --- 5. ОТОБРАЖЕНИЕ КАНБАН-ДОСКИ ---
 sorted_res = sort_items(
@@ -1786,20 +1791,6 @@ sorted_res = sort_items(
     direction="vertical", 
     key=f"kanban_board_{len(st.session_state.tasks_db)}"
 )
-
-# Синхронизация статусов при перетягивании мышкой
-if sorted_res:
-    status_map = {0: "Новая", 1: "В работе", 2: "Завершена"}
-    for idx, col in enumerate(sorted_res):
-        target_status = status_map[idx]
-        for item in col["items"]:
-            # Извлекаем ID задачи из строки стикера
-            task_id = item.split(" | ")[0].replace("#", "")
-            if task_id in st.session_state.tasks_db:
-                st.session_state.tasks_db[task_id]["status"] = target_status
-
-# Синхронизируем обратную запись в единый список
-st.session_state.tasks = list(st.session_state.tasks_db.values())
 
 # --- 6. КЛИК ПО КАРТОЧКЕ ДЛЯ РЕДАКТИРОВАНИЯ ---
 st.divider()
