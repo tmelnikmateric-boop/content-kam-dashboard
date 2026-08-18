@@ -481,6 +481,24 @@ def parse_new_products_by_batches():
   return batches
 
 
+# Словарь менеджеров: Цифровой код -> Фамилия
+MANAGERS_DICT = {
+    '4': 'Волчек',
+    '5': 'Милевская',
+    '6': 'Кононова',
+    '10': 'Синковец',
+    '11': 'Кремень',
+    '14': 'Гиль',
+    '17': 'Кочетков',
+    '27': 'Евтух',
+    '31': 'Ополько',
+    '32': 'Грудина',
+    '34': 'Барташевич',
+    '35': 'Кожедуб',
+    '37': 'Черток',
+}
+
+
 def map_excel_columns(uploaded_df):
   """Разбор столбцов из Excel с фильтрацией пустых строк по первому столбцу и удалением .0."""
   uploaded_df = uploaded_df.loc[:, ~uploaded_df.columns.duplicated()].copy()
@@ -501,12 +519,12 @@ def map_excel_columns(uploaded_df):
       if any(k in c_str for k in keywords):
         series = uploaded_df.iloc[:, idx]
         break
-    
+
     if series is None and default_idx is not None and len(cols) > default_idx:
       series = uploaded_df.iloc[:, default_idx]
 
     if series is None:
-      return [""] * len(uploaded_df)
+      return [''] * len(uploaded_df)
 
     res = series.astype(str).str.strip()
     if clean_code:
@@ -515,39 +533,23 @@ def map_excel_columns(uploaded_df):
     return res.values
 
   return {
-      'Внешний код': get_column_values(['внешний', 'артикул', 'код товара', 'идентификатор', 'код'], default_idx=0, clean_code=True),
-      'Группа 3': get_column_values(['группа 3', 'раздел', 'категория', 'группа'], default_idx=None),
-      'Наименование': get_column_values(['наименование', 'название', 'номенклатура', 'товар'], default_idx=1),
+      'Внешний код': get_column_values(
+          ['внешний', 'артикул', 'код товара', 'идентификатор', 'код'],
+          default_idx=0,
+          clean_code=True,
+      ),
+      'Группа 3': get_column_values(
+          ['группа 3', 'раздел', 'категория', 'группа'], default_idx=None
+      ),
+      'Наименование': get_column_values(
+          ['наименование', 'название', 'номенклатура', 'товар'], default_idx=1
+      ),
+      'Цифровой код менеджера': get_column_values(
+          ['main_mng_code', 'цифровой код менеджера'],
+          default_idx=None,
+          clean_code=True,
+      ),
   }
-
-
-def load_managers_dict():
-    """Вспомогательная функция для загрузки справочника менеджеров из Google Таблицы."""
-    try:
-        gc = get_gspread_client()
-        sh = gc.open_by_url(SPREADSHEET_URL)
-        try:
-            worksheet = sh.worksheet(MANAGERS_SHEET_NAME)
-            records = worksheet.get_all_records()
-            if records:
-                df = pd.DataFrame(records).astype(str)
-                df.columns = df.columns.astype(str).str.strip()
-                # Приводим к нижнему регистру название раздела для удобного поиска без учета регистра
-                managers_map = {}
-                for _, row in df.iterrows():
-                    section = str(row.get('Название раздела', '')).strip().lower()
-                    if section:
-                        managers_map[section] = {
-                            'code': str(row.get('Цифровой код менеджера', '')).strip(),
-                            'manager': str(row.get('Менеджер', '')).strip()
-                        }
-                return managers_map
-        except gspread.WorksheetNotFound:
-            return {}
-    except Exception as e:
-        st.error(f"Ошибка загрузки листа '{MANAGERS_SHEET_NAME}': {e}")
-        return {}
-    return {}
 
 
 def append_new_products_batch(uploaded_files, progress_bar=None, status_text=None):
@@ -557,54 +559,59 @@ def append_new_products_batch(uploaded_files, progress_bar=None, status_text=Non
     try:
       worksheet = sh.worksheet(NEW_PRODUCTS_SHEET_NAME)
     except gspread.WorksheetNotFound:
-      worksheet = sh.add_worksheet(title=NEW_PRODUCTS_SHEET_NAME, rows='1000', cols='10')
+      worksheet = sh.add_worksheet(
+          title=NEW_PRODUCTS_SHEET_NAME, rows='1000', cols='10'
+      )
       worksheet.append_row(NEW_PRODUCTS_COLUMNS)
 
-    # Загружаем карту менеджеров
-    managers_map = load_managers_dict()
-
     now_str = datetime.datetime.now().strftime('%d.%m.%Y %H:%M')
-
     all_rows_to_append = []
     total_files = len(uploaded_files)
 
     for idx, u_file in enumerate(uploaded_files):
       if status_text:
-        status_text.info(f'Чтение файла {idx + 1} из {total_files}: **{u_file.name}**')
+        status_text.info(
+            f'Чтение файла {idx + 1} из {total_files}: **{u_file.name}**'
+        )
 
       u_file.seek(0)
       raw_df = pd.read_excel(u_file, dtype=str)
       mapped_data = map_excel_columns(raw_df)
 
-      sections = mapped_data['Группа 3']
-      
-      # Подтягиваем код и имя менеджера по названию раздела
-      codes = []
-      managers = []
-      for sec in sections:
-        sec_clean = str(sec).strip().lower()
-        if sec_clean in managers_map:
-          codes.append(managers_map[sec_clean]['code'])
-          managers.append(managers_map[sec_clean]['manager'])
-        else:
-          codes.append('')
-          managers.append('')
+      raw_codes = mapped_data['Цифровой код менеджера']
+      codes_clean = []
+      managers_list = []
+
+      # Обрабатываем полученные цифровые коды
+      for val in raw_codes:
+        code_str = (
+            str(val).replace('.0', '').strip()
+            if pd.notna(val) and str(val).lower() not in ['nan', 'none', '']
+            else ''
+        )
+        codes_clean.append(code_str)
+        # Автоматически подставляем фамилию по коду
+        managers_list.append(MANAGERS_DICT.get(code_str, ''))
 
       formatted_df = pd.DataFrame({
           'Внешний код': mapped_data['Внешний код'],
           'Наименование': mapped_data['Наименование'],
           'Дата создания': '',
-          'Цифровой код менеджера': codes,
-          'Название раздела': sections,
-          'Менеджер': managers,
+          'Цифровой код менеджера': codes_clean,
+          'Название раздела': mapped_data['Группа 3'],
+          'Менеджер': managers_list,
           'Контент': '',
       })
 
-      formatted_df = formatted_df.astype(str).replace({'nan': '', 'NaN': '', 'None': '', '<NA>': '', 'NaT': ''})
+      formatted_df = formatted_df.astype(str).replace(
+          {'nan': '', 'NaN': '', 'None': '', '<NA>': '', 'NaT': ''}
+      )
       formatted_df = formatted_df[NEW_PRODUCTS_COLUMNS]
 
       if not formatted_df.empty:
-        date_header_row = [f'📅 Загрузка от {now_str} ({u_file.name})'] + [''] * (len(NEW_PRODUCTS_COLUMNS) - 1)
+        date_header_row = [f'📅 Загрузка от {now_str} ({u_file.name})'] + [
+            ''
+        ] * (len(NEW_PRODUCTS_COLUMNS) - 1)
         all_rows_to_append.append(date_header_row)
         all_rows_to_append.extend(formatted_df.values.tolist())
 
