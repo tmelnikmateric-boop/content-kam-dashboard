@@ -1675,95 +1675,41 @@ st.link_button(
 )
 
 # ------------------------------------------
-# ВКЛАДКА 3: ЗАДАЧИ (UI В СТИЛЕ СКИЗУ/РЕФЕРЕНСА)
+# ВКЛАДКА 3: ЗАДАЧИ (КАНБАН С DRAG-AND-DROP И КЛИКОМ)
 # ------------------------------------------
 with main_tab3:
-    # --- CSS СТИЛИ ДЛЯ КАРТОЧЕК ---
+    # --- CSS СТИЛИ ДЛЯ DRAG-AND-DROP КАРТОЧЕК ---
     st.markdown("""
         <style>
-        .kanban-card {
-            background-color: #ffffff;
-            border-radius: 12px;
-            padding: 16px;
-            margin-bottom: 14px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-            border: 1px solid #eef2f6;
-            font-family: system-ui, -apple-system, sans-serif;
+        /* Стилизация контейнера sortables под красивую карточку */
+        ul[data-testid="stSortableList"] > li {
+            background-color: #ffffff !important;
+            border-radius: 12px !important;
+            padding: 14px 16px !important;
+            margin-bottom: 12px !important;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05) !important;
+            border: 1px solid #eef2f6 !important;
+            font-family: system-ui, -apple-system, sans-serif !important;
+            color: #1e293b !important;
+            cursor: grab !important;
+            transition: all 0.2s ease !important;
         }
-        .card-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 11px;
-            color: #8c98a4;
-            margin-bottom: 6px;
-            font-weight: 600;
+        ul[data-testid="stSortableList"] > li:hover {
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.09) !important;
+            border-color: #cbd5e1 !important;
+            transform: translateY(-2px);
         }
-        .card-title {
-            font-size: 15px;
-            font-weight: 700;
-            color: #1e293b;
-            margin-bottom: 8px;
-            line-height: 1.3;
-        }
-        .card-desc {
-            font-size: 12px;
-            color: #64748b;
-            margin-bottom: 12px;
-            display: -webkit-box;
-            -webkit-line-clamp: 2;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
-        }
-        .card-meta {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 12px;
-            margin-bottom: 10px;
-        }
-        .badge-urgent {
-            background-color: #fef2f2;
-            color: #dc2626;
-            padding: 2px 8px;
-            border-radius: 6px;
-            font-weight: 600;
-            font-size: 11px;
-        }
-        .badge-normal {
-            background-color: #f1f5f9;
-            color: #475569;
-            padding: 2px 8px;
-            border-radius: 6px;
-            font-weight: 500;
-            font-size: 11px;
-        }
-        .card-footer {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding-top: 8px;
-            border-top: 1px solid #f1f5f9;
-            font-size: 12px;
-            color: #475569;
-        }
-        .executor-tag {
-            background: #f8fafc;
-            border: 1px solid #e2e8f0;
-            padding: 3px 8px;
-            border-radius: 20px;
-            font-size: 11px;
-            font-weight: 500;
-        }
-        .column-header {
+        /* Шапки колонок Канбана */
+        .kanban-col-header {
             background: #f1f5f9;
             padding: 10px 14px;
-            border-radius: 8px;
+            border-radius: 10px;
             font-weight: 700;
             font-size: 14px;
             color: #334155;
             margin-bottom: 12px;
             text-align: center;
+            border: 1px solid #e2e8f0;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -1771,7 +1717,7 @@ with main_tab3:
     # --- 1. ЗАГРУЗКА ДАННЫХ ИЗ GOOGLE SHEETS ---
     tasks_df = load_tasks_data()
 
-    # --- 2. ДИАЛОГ РЕДАКТИРОВАНИЯ ---
+    # --- 2. ВСПЛЫВАЮЩИЙ ДИАЛОГ КАРТОЧКИ ---
     @st.dialog("✏️ Карточка задачи")
     def open_task_card_dialog(task_id):
         df_current = load_tasks_data()
@@ -1843,82 +1789,97 @@ with main_tab3:
                     st.success("Удалено!")
                     st.rerun()
 
-    # --- 3. ШАПКА И СОЗДАНИЕ ---
-    col_head1, col_head2 = st.columns([3, 1])
-    with col_head1:
+    # --- 3. ШАПКА ВЕБ-СТРАНИЦЫ ---
+    col_h1, col_h2 = st.columns([3, 1])
+    with col_h1:
         st.subheader("🎯 Доска задач")
-    with col_head2:
+    with col_h2:
         if st.button("➕ Новая задача", type="primary", use_container_width=True):
             modal_add_task()
 
     st.write("")
 
-    # --- 4. РАЗБИЕНИЕ НА 3 РАВНЫЕ КОЛОНКИ ---
-    col_new, col_in_prog, col_done = st.columns([1, 1, 1])
+    # --- 4. ФОРМИРОВАНИЕ ДАННЫХ ДЛЯ КАНБАНА С DRAG-AND-DROP ---
+    kanban_data = {"Новая": [], "В работе": [], "Завершена": []}
 
-    columns_map = {
-        "Новая": (col_new, "🆕 Новые"),
-        "В работе": (col_in_prog, "⚙️ В работе"),
-        "Завершена": (col_done, "✅ Завершенные")
-    }
-
-    # Отрисовка заголовков колонок
-    for status_key, (col_obj, title_text) in columns_map.items():
-        with col_obj:
-            st.markdown(f'<div class="column-header">{title_text}</div>', unsafe_allow_html=True)
-
-    # Заполнение карточками
     if not tasks_df.empty:
         for _, row in tasks_df.iterrows():
             t_id = str(row.get("ID", ""))
             t_status = str(row.get("Статус", "Новая")).strip()
             
-            # Определение целевой колонки
             if "работ" in t_status.lower():
-                target_col, _ = columns_map["В работе"]
+                norm_status = "В работе"
             elif "заверш" in t_status.lower() or "выполн" in t_status.lower():
-                target_col, _ = columns_map["Завершена"]
+                norm_status = "Завершена"
             else:
-                target_col, _ = columns_map["Новая"]
+                norm_status = "Новая"
 
             t_title = row.get("Тема", "Без темы")
-            t_desc = row.get("Описание", "")
             t_execs = row.get("Исполнители", "Не указан")
-            t_urgency = row.get("Срочность", "Текущая задача")
-            t_date = row.get("Дата создания", "")
+            urgency_flag = "🔥 " if row.get("Срочность") == "Срочно" else "📋 "
 
-            urgency_html = (
-                '<span class="badge-urgent">🔥 Срочно</span>' 
-                if t_urgency == "Срочно" 
-                else '<span class="badge-normal">📋 Обычная</span>'
+            # Форматируем текст карточки внутри drag-and-drop
+            card_text = f"#{t_id} | {urgency_flag}{t_title}  \n👤 {t_execs}"
+            kanban_data[norm_status].append(card_text)
+
+    structure = [
+        {"header": "🆕 Новые", "items": kanban_data["Новая"]},
+        {"header": "⚙️ В работе", "items": kanban_data["В работе"]},
+        {"header": "✅ Завершенные", "items": kanban_data["Завершена"]}
+    ]
+
+    # --- 5. КАНБАН ДОСКА (3 КОЛОНКИ ДРАГ-Н-ДРОП) ---
+    sorted_res = sort_items(
+        structure, 
+        multi_containers=True, 
+        direction="vertical", 
+        key=f"kanban_board_drag_{len(tasks_df)}"
+    )
+
+    # --- 6. АВТОМАТИЧЕСКАЯ СИНХРОНИЗАЦИЯ ПРИ ПЕРЕТАСКИВАНИИ ---
+    status_mapping = {
+        "🆕 Новые": "Новая",
+        "⚙️ В работе": "В работе",
+        "✅ Завершенные": "Завершена"
+    }
+
+    if sorted_res:
+        has_changes = False
+        for container in sorted_res:
+            col_title = container.get("header")
+            target_status = status_mapping.get(col_title)
+            
+            for item_text in container.get("items", []):
+                # Извлекаем ID задачи из строки формата "#1 | ..."
+                if item_text.startswith("#"):
+                    extracted_id = item_text.split(" | ")[0].replace("#", "").strip()
+                    
+                    mask = tasks_df['ID'] == extracted_id
+                    if not tasks_df[mask].empty:
+                        current_status = tasks_df.loc[mask, 'Статус'].values[0]
+                        if current_status != target_status:
+                            tasks_df.loc[mask, 'Статус'] = target_status
+                            tasks_df.loc[mask, 'Дата обновления'] = datetime.datetime.now().strftime('%d.%m.%Y %H:%M')
+                            has_changes = True
+
+        if has_changes:
+            save_all_tasks(tasks_df)
+            st.rerun()
+
+    st.divider()
+
+    # --- 7. БЫСТРЫЙ ВЫБОР ДЛЯ ОТКРЫТИЯ КАРТОЧКИ ---
+    if not tasks_df.empty:
+        selected_task_id = st.selectbox(
+            "👇 Выберите задачу из списка для просмотра или редактирования:",
+            options=tasks_df['ID'].tolist(),
+            format_func=lambda x: (
+                f"#{x} - {tasks_df[tasks_df['ID'] == x]['Тема'].values[0]} "
+                f"[{tasks_df[tasks_df['ID'] == x]['Статус'].values[0]}]"
             )
-
-            desc_html = f'<div class="card-desc">{t_desc}</div>' if t_desc else ''
-
-            card_html = f"""
-            <div class="kanban-card">
-                <div class="card-header">
-                    <span>TASK-{t_id}</span>
-                    <span>{t_date}</span>
-                </div>
-                <div class="card-title">{t_title}</div>
-                {desc_html}
-                <div class="card-meta">
-                    {urgency_html}
-                </div>
-                <div class="card-footer">
-                    <span class="executor-tag">👤 {t_execs}</span>
-                </div>
-            </div>
-            """
-
-            with target_col:
-                st.markdown(card_html, unsafe_allow_html=True)
-                if st.button(f"✏️ Открыть #{t_id}", key=f"btn_open_{t_id}", use_container_width=True):
-                    open_task_card_dialog(t_id)
-                st.write("")
-    else:
-        st.info("Задач пока нет.")
+        )
+        if st.button("🔍 Открыть выбранную карточку", use_container_width=True, type="secondary"):
+            open_task_card_dialog(selected_task_id)
         
 # ==========================================
 # ВКЛАДКА 2: ОТКРЫТИЕ ГРУПП
