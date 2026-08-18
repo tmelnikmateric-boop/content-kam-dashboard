@@ -1599,11 +1599,9 @@ with main_tab1:
             progress_bar.empty()
             st.error(f'Ошибка обработки файлов: {e}')
 
-    with col_actions:
-      st.subheader('2. Управление статусами')
+    st.subheader('2. Управление статусами')
 st.write('Выберите действие по файлам:')
 
-# Создаем 5 колонок для кнопок
 col_act1, col_act2, col_act3, col_act4, col_act5 = st.columns(5)
 
 with col_act1:
@@ -1642,7 +1640,7 @@ with col_act4:
     else:
       st.warning('Выберите хотя бы один файл!')
 
-# 5-Я КНОПКА: УДАЛЕНИЕ ВЫБРАННЫХ ФАЙЛОВ
+# 5-Я КНОПКА: БЕЗОПАСНОЕ УДАЛЕНИЕ СТРОК ВЫБРАННЫХ ФАЙЛОВ
 with col_act5:
   if st.button('🗑️ Удалить', type='secondary', use_container_width=True):
     if not selected_files:
@@ -1656,9 +1654,8 @@ with col_act5:
         all_vals = ws.get_all_values()
         if all_vals:
           header = all_vals[0]
-          rows = all_vals[1:]
 
-          # Ищем индекс колонки с именем файла (обычно это 2-я или 3-я колонка)
+          # Находим индекс колонки с названием файла
           file_col_idx = 1
           for idx, col_name in enumerate(header):
             if any(
@@ -1668,18 +1665,18 @@ with col_act5:
               file_col_idx = idx
               break
 
-          # Оставляем только те строки, которых НЕТ в списке выбранных к удалению
-          new_rows = [
-              r
-              for r in rows
-              if len(r) > file_col_idx and r[file_col_idx] not in selected_files
-          ]
+          # Находим номера строк (индексы gspread начинаются с 1), которые нужно удалить
+          rows_to_delete = []
+          for r_idx, row in enumerate(all_vals[1:], start=2):
+            if (
+                len(row) > file_col_idx
+                and row[file_col_idx].strip() in selected_files
+            ):
+              rows_to_delete.append(r_idx)
 
-          # Перезаписываем таблицу
-          ws.clear()
-          ws.append_row(header)
-          if new_rows:
-            ws.append_rows(new_rows)
+          # Удаляем найденные строки снизу вверх (чтобы не сбивались номера строк)
+          for r_num in sorted(rows_to_delete, reverse=True):
+            ws.delete_rows(r_num)
 
           st.success(f'Удалено файлов: {len(selected_files)}')
           st.rerun()
