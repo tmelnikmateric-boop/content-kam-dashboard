@@ -1675,66 +1675,96 @@ st.link_button(
 )
 
 # ------------------------------------------
-# ВКЛАДКА 3: ЗАДАЧИ (КРАСИВЫЕ КАРТОЧКИ + DRAG-AND-DROP + КЛИК)
+# ВКЛАДКА 3: ЗАДАЧИ (КВАДРАТНЫЕ КАРТОЧКИ С КНОПКОЙ И ФИКСИРОВАННЫМИ КОЛОНКАМИ)
 # ------------------------------------------
 with main_tab3:
-    # --- СУПЕР-СТИЛИЗАЦИЯ SORTABLES ПОД РЕФЕРЕНС ---
+    # --- CSS СТИЛИ ДЛЯ КВАДРАТНЫХ КАРТОЧЕК И ФИКСАЦИИ ШИРИНЫ ---
     st.markdown("""
         <style>
-        /* Ограничение ширины и сетка для контейнера Sortables */
-        div[data-testid="stHorizontalBlock"] {
-            gap: 16px !important;
-        }
-        
-        /* Стилизация каждой карточки */
-        ul[data-testid="stSortableList"] {
-            padding: 4px !important;
-            background-color: #f8fafc !important;
-            border-radius: 12px !important;
-            min-height: 400px !important;
-            border: 1px dashed #cbd5e1 !important;
-        }
-
-        ul[data-testid="stSortableList"] > li {
-            background: #ffffff !important;
-            border-radius: 10px !important;
-            padding: 12px 14px !important;
-            margin-bottom: 10px !important;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04) !important;
-            border: 1px solid #e2e8f0 !important;
-            font-family: system-ui, -apple-system, sans-serif !important;
-            color: #0f172a !important;
-            cursor: grab !important;
-            transition: all 0.15s ease-in-out !important;
-        }
-
-        ul[data-testid="stSortableList"] > li:hover {
-            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08) !important;
-            border-color: #3b82f6 !important;
-            transform: translateY(-2px);
+        /* Фиксация равной ширины для колонок Канбана */
+        [data-testid="column"] {
+            min-width: 300px !important;
+            flex: 1 1 0px !important;
         }
 
         /* Заголовки колонок */
-        .kanban-header-box {
+        .kanban-col-header {
             background-color: #f1f5f9;
-            padding: 8px 12px;
+            padding: 10px;
             border-radius: 8px;
             font-weight: 700;
             font-size: 13px;
-            color: #475569;
+            color: #334155;
             text-align: center;
-            margin-bottom: 8px;
+            margin-bottom: 12px;
+            border: 1px solid #e2e8f0;
             text-transform: uppercase;
             letter-spacing: 0.5px;
+        }
+
+        /* Квадратная пропорция для карточки задачи */
+        div[data-testid="stVerticalBlockBorderWrapper"] {
+            background: #ffffff !important;
+            border-radius: 12px !important;
+            border: 1px solid #e2e8f0 !important;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.03) !important;
+            transition: all 0.2s ease !important;
+            aspect-ratio: 1 / 1 !important; /* Делает карточку квадратной */
+            display: flex !important;
+            flex-direction: column !important;
+            justify-content: space-between !important;
+            padding: 12px !important;
+        }
+
+        div[data-testid="stVerticalBlockBorderWrapper"]:hover {
+            border-color: #3b82f6 !important;
+            box-shadow: 0 6px 14px rgba(0,0,0,0.08) !important;
+        }
+
+        /* Бейджи внутри карточки */
+        .card-badge-urgent {
+            background-color: #fef2f2;
+            color: #dc2626;
+            padding: 2px 6px;
+            border-radius: 6px;
+            font-size: 10px;
+            font-weight: 700;
+        }
+        .card-badge-normal {
+            background-color: #f8fafc;
+            color: #64748b;
+            padding: 2px 6px;
+            border-radius: 6px;
+            font-size: 10px;
+            font-weight: 600;
+            border: 1px solid #e2e8f0;
+        }
+        .card-task-title {
+            font-weight: 700;
+            font-size: 14px;
+            color: #0f172a;
+            line-height: 1.25;
+            margin-top: 4px;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        .card-executor {
+            font-size: 11px;
+            color: #64748b;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
         </style>
     """, unsafe_allow_html=True)
 
-    # --- 1. ЗАГРУЗКА ДАННЫХ ---
+    # --- 1. ЗАГРУЗКА ДАННЫХ ИЗ GOOGLE SHEETS ---
     tasks_df = load_tasks_data()
 
-    # --- 2. ВСПЛЫВАЮЩИЙ ДИАЛОГ ---
-    @st.dialog("✏️ Карточка задачи")
+    # --- 2. ВСПЛЫВАЮЩИЙ ДИАЛОГ (ПРОСМОТР / РЕДАКТИРОВАНИЕ) ---
+    @st.dialog("📋 Карточка задачи")
     def open_task_card_dialog(task_id):
         df_current = load_tasks_data()
         task_row = df_current[df_current['ID'] == str(task_id)]
@@ -1760,10 +1790,10 @@ with main_tab3:
                 edit_status = st.selectbox("Статус:", st_options, index=st_index)
 
             edit_executors = st.text_input("Исполнители *", value=row['Исполнители'])
-            edit_desc = st.text_area("Описание задачи", value=row['Описание'], height=110)
+            edit_desc = st.text_area("Описание задачи", value=row['Описание'], height=120)
 
             if row['Изображения Base64']:
-                st.image(row['Изображения Base64'], width=180)
+                st.image(row['Изображения Base64'], width=200)
 
             uploaded_img = st.file_uploader("Прикрепить / заменить фото", type=['png', 'jpg', 'jpeg', 'webp'])
 
@@ -1805,7 +1835,7 @@ with main_tab3:
                     st.success("Удалено!")
                     st.rerun()
 
-    # --- 3. ШАПКА ВЕБ-СТРАНИЦЫ ---
+    # --- 3. ШАПКА ---
     col_h1, col_h2 = st.columns([3, 1])
     with col_h1:
         st.subheader("🎯 Доска задач")
@@ -1815,86 +1845,62 @@ with main_tab3:
 
     st.write("")
 
-    # --- 4. ПОДГОТОВКА ДАННЫХ ---
-    kanban_data = {"Новая": [], "В работе": [], "Завершена": []}
+    # --- 4. 3 ФИКСИРОВАННЫХ СТОЛБЦА ОДИНАКОВОЙ ШИРИНЫ ---
+    col_todo, col_in_prog, col_done = st.columns([1, 1, 1], gap="medium")
 
-    if not tasks_df.empty:
-        for _, row in tasks_df.iterrows():
-            t_id = str(row.get("ID", ""))
-            t_status = str(row.get("Статус", "Новая")).strip()
-            
-            if "работ" in t_status.lower():
-                norm_status = "В работе"
-            elif "заверш" in t_status.lower() or "выполн" in t_status.lower():
-                norm_status = "Завершена"
-            else:
-                norm_status = "Новая"
-
-            t_title = row.get("Тема", "Без темы")
-            t_execs = row.get("Исполнители", "—")
-            urg_icon = "🔥 " if row.get("Срочность") == "Срочно" else ""
-
-            # Лаконичное оформление строки карточки
-            card_text = f"#{t_id} | {urg_icon}{t_title} \n👤 {t_execs}"
-            kanban_data[norm_status].append(card_text)
-
-    structure = [
-        {"header": "🆕 TO DO", "items": kanban_data["Новая"]},
-        {"header": "⚙️ IN PROGRESS", "items": kanban_data["В работе"]},
-        {"header": "✅ DONE", "items": kanban_data["Завершена"]}
+    columns_config = [
+        (col_todo, "🆕 TO DO", ["новая"]),
+        (col_in_prog, "⚙️ IN PROGRESS", ["в работе", "работа"]),
+        (col_done, "✅ DONE", ["завершена", "готово", "выполнено"])
     ]
 
-    # --- 5. DRAG-AND-DROP КАНБАН ---
-    sorted_res = sort_items(
-        structure, 
-        multi_containers=True, 
-        direction="vertical", 
-        key=f"kanban_board_drag_{len(tasks_df)}"
-    )
-
-    # --- 6. АВТО-СОХРАНЕНИЕ СТАТУСОВ ПРИ ПЕРЕТАСКИВАНИИ ---
-    status_mapping = {
-        "🆕 TO DO": "Новая",
-        "⚙️ IN PROGRESS": "В работе",
-        "✅ DONE": "Завершена"
-    }
-
-    if sorted_res:
-        has_changes = False
-        for container in sorted_res:
-            col_title = container.get("header")
-            target_status = status_mapping.get(col_title)
+    # --- 5. ОТОБРАЖЕНИЕ КВАДРАТНЫХ КАРТОЧЕК ---
+    for col_obj, header_text, status_keys in columns_config:
+        with col_obj:
+            st.markdown(f'<div class="kanban-col-header">{header_text}</div>', unsafe_allow_html=True)
             
-            for item_text in container.get("items", []):
-                if item_text.startswith("#"):
-                    extracted_id = item_text.split(" | ")[0].replace("#", "").strip()
-                    
-                    mask = tasks_df['ID'] == extracted_id
-                    if not tasks_df[mask].empty:
-                        current_status = tasks_df.loc[mask, 'Статус'].values[0]
-                        if current_status != target_status:
-                            tasks_df.loc[mask, 'Статус'] = target_status
-                            tasks_df.loc[mask, 'Дата обновления'] = datetime.datetime.now().strftime('%d.%m.%Y %H:%M')
-                            has_changes = True
+            if not tasks_df.empty:
+                # Фильтруем задачи для текущей колонки
+                col_tasks = tasks_df[tasks_df['Статус'].str.lower().apply(
+                    lambda x: any(k in str(x) for k in status_keys)
+                )]
+                
+                # Дефолтная колонка для нераспознанных статусов — TO DO
+                if header_text == "🆕 TO DO":
+                    unmatched_tasks = tasks_df[~tasks_df['Статус'].str.lower().apply(
+                        lambda x: any(k in str(x) for k in ["в работе", "работа", "завершена", "готово", "выполнено"])
+                    )]
+                    col_tasks = pd.concat([col_tasks, unmatched_tasks]).drop_duplicates(subset=['ID'])
 
-        if has_changes:
-            save_all_tasks(tasks_df)
-            st.rerun()
+                for _, row in col_tasks.iterrows():
+                    t_id = str(row['ID'])
+                    t_title = row.get('Тема', 'Без темы')
+                    t_exec = row.get('Исполнители', '—')
+                    t_urgency = row.get('Срочность', 'Текущая задача')
 
-    st.write("")
+                    urgency_html = (
+                        '<span class="card-badge-urgent">🔥 СРОЧНО</span>' 
+                        if t_urgency == "Срочно" 
+                        else '<span class="card-badge-normal">📋 ОБЫЧНАЯ</span>'
+                    )
 
-    # --- 7. БЫСТРЫЙ КЛИК ПО ЗАДАЧЕ ДЛЯ РЕДАКТИРОВАНИЯ (БЕЗ НИЖНИХ СЕЛЕКТОВ) ---
-    st.markdown("**Быстрый просмотр / Редактирование карточки:**")
-    if not tasks_df.empty:
-        # Выводим компактные кнопочки прямо под канбаном в 3 колонки
-        cols_btn = st.columns(3)
-        for idx, row in tasks_df.iterrows():
-            t_id = row['ID']
-            col_idx = idx % 3
-            with cols_btn[col_idx]:
-                if st.button(f"✏️ #{t_id} {row['Тема'][:20]}...", key=f"quick_edit_{t_id}", use_container_width=True):
-                    open_task_card_dialog(t_id)
-        
+                    # Контейнер-карточка квадратной формы
+                    with st.container(border=True):
+                        st.markdown(f"""
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <span style="font-size: 11px; font-weight: 700; color: #94a3b8;">#{t_id}</span>
+                                {urgency_html}
+                            </div>
+                            <div class="card-task-title">{t_title}</div>
+                            <div class="card-executor">👤 {t_exec}</div>
+                        """, unsafe_allow_html=True)
+                        
+                        st.write("")
+                        # Кнопка просмотра/редактирования карточки
+                        if st.button("🔍 Описание", key=f"btn_view_{t_id}", use_container_width=True):
+                            open_task_card_dialog(t_id)
+            else:
+                st.caption("Нет задач")
 # ==========================================
 # ВКЛАДКА 2: ОТКРЫТИЕ ГРУПП
 # ==========================================
