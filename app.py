@@ -963,7 +963,46 @@ def modal_complete(dept_info, summary_df, df):
       if save_dept_data(dept_info, df):
         st.success("Статус обновлен на 'Выполнено'")
         st.rerun()
+def delete_task_file_by_name(file_name_to_delete):
+  """Удаляет из листа задач строки, соответствующие указанному имени файла."""
+  try:
+    gc = get_gspread_client()
+    sh = gc.open_by_url(SPREADSHEET_URL)
+    worksheet = sh.worksheet(TASKS_SHEET_NAME)
 
+    # Получаем все данные из таблицы
+    records = worksheet.get_all_records()
+    if not records:
+      return False
+
+    df = pd.DataFrame(records)
+
+    # Ищем колонку с именем файла
+    file_col = None
+    for col in df.columns:
+      if 'файл' in str(col).lower() or 'название' in str(col).lower():
+        file_col = col
+        break
+
+    if file_col:
+      # Фильтруем строки, оставляя только те, где имя файла не совпадает
+      initial_count = len(df)
+      df_filtered = df[
+          df[file_col].astype(str).str.strip() != str(file_name_to_delete).strip()
+      ]
+
+      if len(df_filtered) < initial_count:
+        # Перезаписываем лист без удаленных строк
+        worksheet.clear()
+        worksheet.append_row(df.columns.tolist())
+        if not df_filtered.empty:
+          worksheet.append_rows(df_filtered.values.tolist())
+        return True
+
+    return False
+  except Exception as e:
+    st.error(f'Ошибка при удалении файла задач: {e}')
+    return False
 
 @st.dialog('📊 Аналитика и статистика')
 def modal_analytics():
@@ -1562,21 +1601,90 @@ with main_tab1:
 
     with col_actions:
       st.subheader('2. Управление статусами')
-      st.write('Выберите действие по файлам:')
+st.write('Выберите действие по файлам:')
 
-      btn_col1, btn_col2, btn_col3, btn_col4 = st.columns(4)
+# Создаем 5 колонок для кнопок
+col_act1, col_act2, col_act3, col_act4, col_act5 = st.columns(5)
 
-      if btn_col1.button('▶️ В работу', use_container_width=True):
-        modal_take_in_work(dept_info, summary_df, df)
+with col_act1:
+  if st.button('▶️ В работу', use_container_width=True):
+    if selected_files:
+      update_status_for_files(selected_files, 'В работу')
+      st.success('Статус обновлен!')
+      st.rerun()
+    else:
+      st.warning('Выберите хотя бы один файл!')
 
-      if btn_col2.button('⏸️ На паузу', use_container_width=True):
-        modal_pause(dept_info, summary_df, df)
+with col_act2:
+  if st.button('⏸️ На паузу', use_container_width=True):
+    if selected_files:
+      update_status_for_files(selected_files, 'На паузе')
+      st.success('Статус обновлен!')
+      st.rerun()
+    else:
+      st.warning('Выберите хотя бы один файл!')
 
-      if btn_col3.button('▶️ Снять с паузы', use_container_width=True):
-        modal_unpause(dept_info, summary_df, df)
+with col_act3:
+  if st.button('▶️ Снять с паузы', use_container_width=True):
+    if selected_files:
+      update_status_for_files(selected_files, 'В работу')
+      st.success('Статус обновлен!')
+      st.rerun()
+    else:
+      st.warning('Выберите хотя бы один файл!')
 
-      if btn_col4.button('✅ Завершить', use_container_width=True):
-        modal_complete(dept_info, summary_df, df)
+with col_act4:
+  if st.button('✅ Завершить', use_container_width=True):
+    if selected_files:
+      update_status_for_files(selected_files, 'Завершен')
+      st.success('Статус обновлен!')
+      st.rerun()
+    else:
+      st.warning('Выберите хотя бы один файл!')
+
+# 5-Я КНОПКА: УДАЛЕНИЕ ВЫБРАННЫХ ФАЙЛОВ
+with col_act5:
+  if st.button('🗑️ Удалить', type='secondary', use_container_width=True):
+    if not selected_files:
+      st.warning('Выберите хотя бы один файл для удаления!')
+    else:
+      try:
+        gc = get_gspread_client()
+        sh = gc.open_by_url(SPREADSHEET_URL)
+        ws = sh.worksheet(TASKS_SHEET_NAME)
+
+        all_vals = ws.get_all_values()
+        if all_vals:
+          header = all_vals[0]
+          rows = all_vals[1:]
+
+          # Ищем индекс колонки с именем файла (обычно это 2-я или 3-я колонка)
+          file_col_idx = 1
+          for idx, col_name in enumerate(header):
+            if any(
+                k in str(col_name).lower()
+                for k in ['файл', 'название', 'filename']
+            ):
+              file_col_idx = idx
+              break
+
+          # Оставляем только те строки, которых НЕТ в списке выбранных к удалению
+          new_rows = [
+              r
+              for r in rows
+              if len(r) > file_col_idx and r[file_col_idx] not in selected_files
+          ]
+
+          # Перезаписываем таблицу
+          ws.clear()
+          ws.append_row(header)
+          if new_rows:
+            ws.append_rows(new_rows)
+
+          st.success(f'Удалено файлов: {len(selected_files)}')
+          st.rerun()
+      except Exception as e:
+        st.error(f'Ошибка при удалении: {e}')
           
     with col_extra:
       st.subheader('3. Дополнительная информация')
