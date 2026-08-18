@@ -32,6 +32,15 @@ st.markdown("""
     h1, h2, h3, h4, h5, h6, .card-task-title, .kanban-col-header {
         font-family: 'Inter', -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif !important;
     }
+    /* Глобальный цвет фона приложения */
+    .stApp, [data-testid="stAppViewContainer"] {
+        background-color: #f7f7f7 !important;
+    }
+
+    /* Настройка фона для сайдбара (если используется) */
+    [data-testid="stSidebar"] {
+        background-color: #ffffff !important;
+    }
     </style>
 """, unsafe_allow_html=True)
 
