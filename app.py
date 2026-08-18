@@ -1678,134 +1678,171 @@ st.link_button(
 # ВКЛАДКА 3: ЗАДАЧИ
 # ------------------------------------------
 
-import uuid
-import streamlit as st
-from streamlit_sortables import sort_items
+# ------------------------------------------
+# ВКЛАДКА 3: ЗАДАЧИ
+# ------------------------------------------
+with main_tab3:
+    # --- 1. ЗАГРУЗКА И СИНХРОНИЗАЦИЯ С GOOGLE SHEETS ---
+    tasks_df = load_tasks_data()
 
-# --- 1. СПРАВОЧНИКИ И ИНИЦИАЛИЗАЦИЯ ---
-EXECUTORS = ["Не назначен", "Таня", "Катя", "Анжелика"]
-
-# Загрузка задач из вашей текущей таблицы/session_state
-if "tasks_db" not in st.session_state:
-    # Если в session_state уже есть tasks из таблицы, конвертируем их в удобную структуру
-    if "tasks" in st.session_state and isinstance(st.session_state.tasks, list):
-        st.session_state.tasks_db = {
-            str(idx + 1): {
-                "title": t.get("title", f"Задача {idx + 1}"),
-                "desc": t.get("desc", ""),
-                "status": t.get("status", "Новая"),
-                "executor": t.get("executor", "Не назначен")
-            }
-            for idx, t in enumerate(st.session_state.tasks)
-        }
-    else:
-        # Базовая структура, если таблица пуста
-        st.session_state.tasks_db = {}
-
-# --- 2. МОДАЛЬНОЕ ОКНО ПРОСМОТРА / РЕДАКТИРОВАНИЯ ---
-@st.dialog("📌 Карточка задачи")
-def open_task_dialog(task_id):
-    if task_id not in st.session_state.tasks_db:
-        st.rerun()
+    # --- 2. ВСПЛЫВАЮЩИЕ ДИАЛОГИ ---
+    @st.dialog("✏️ Карточка задачи")
+    def open_task_card_dialog(task_id):
+        df_current = load_tasks_data()
+        task_row = df_current[df_current['ID'] == str(task_id)]
         
-    task = st.session_state.tasks_db[task_id]
-    
-    new_title = st.text_input("Название задачи", value=task.get("title", ""))
-    
-    # Выбор исполнителя из справочника
-    current_exec = task.get("executor", "Не назначен")
-    exec_index = EXECUTORS.index(current_exec) if current_exec in EXECUTORS else 0
-    new_executor = st.selectbox("Исполнитель", EXECUTORS, index=exec_index)
-    
-    new_desc = st.text_area("Описание / Детали", value=task.get("desc", ""), height=100)
-    
-    statuses = ["Новая", "В работе", "Завершена"]
-    current_status = task.get("status", "Новая")
-    status_index = statuses.index(current_status) if current_status in statuses else 0
-    new_status = st.selectbox("Статус", statuses, index=status_index)
-    
-    col1, col2 = st.columns([1, 1])
-    
-    with col1:
-        if st.button("💾 Сохранить", use_container_width=True, type="primary"):
-            st.session_state.tasks_db[task_id].update({
-                "title": new_title,
-                "desc": new_desc,
-                "status": new_status,
-                "executor": new_executor
-            })
+        if task_row.empty:
+            st.error("Задача не найдена!")
             st.rerun()
+            return
+
+        row = task_row.iloc[0]
+
+        with st.form(f"dialog_task_form_{task_id}"):
+            edit_title = st.text_input("Тема задачи *", value=row['Тема'])
+
+            col1, col2 = st.columns(2)
+            with col1:
+                urg_options = ['Текущая задача', 'Срочно']
+                urg_index = urg_options.index(row['Срочность']) if row['Срочность'] in urg_options else 0
+                edit_urgency = st.selectbox("Срочность:", urg_options, index=urg_index)
+            with col2:
+                st_options = ['Новая', 'В работе', 'Завершена']
+                st_index = st_options.index(row['Статус']) if row['Статус'] in st_options else 0
+                edit_status = st.selectbox("Статус:", st_options, index=st_index)
+
+            edit_executors = st.text_input(
+                "Исполнители *", 
+                value=row['Исполнители'], 
+                help="Укажите имена через запятую"
+            )
+
+            edit_desc = st.text_area("Описание задачи", value=row['Описание'], height=130)
+
+            if row['Изображения Base64']:
+                st.markdown("**Прикрепленное изображение:**")
+                st.image(row['Изображения Base64'], width=200)
+
+            uploaded_img = st.file_uploader(
+                "Заменить / прикрепить изображение", 
+                type=['png', 'jpg', 'jpeg', 'webp'],
+                key=f"dialog_img_{task_id}"
+            )
+
+            btn_save, btn_del = st.columns([1, 1])
+
+            with btn_save:
+                submitted = st.form_submit_button("💾 Сохранить", use_container_width=True, type="primary")
+            with btn_del:
+                deleted = st.form_submit_button("🗑 Удалить", use_container_width=True)
+
+            if submitted:
+                if not edit_title.strip():
+                    st.warning("Заполните тему задачи!")
+                elif not edit_executors.strip():
+                    st.warning("Укажите исполнителя!")
+                else:
+                    now_str = datetime.datetime.now().strftime('%d.%m.%Y %H:%M')
+                    img_b64 = row['Изображения Base64']
+                    
+                    if uploaded_img is not None:
+                        bytes_data = uploaded_img.getvalue()
+                        b64_str = base64.b64encode(bytes_data).decode('utf-8')
+                        mime_type = uploaded_img.type
+                        img_b64 = f"data:{mime_type};base64,{b64_str}"
+
+                    mask = df_current['ID'] == str(task_id)
+                    df_current.loc[mask, 'Тема'] = edit_title.strip()
+                    df_current.loc[mask, 'Описание'] = edit_desc.strip()
+                    df_current.loc[mask, 'Исполнители'] = edit_executors.strip()
+                    df_current.loc[mask, 'Статус'] = edit_status
+                    df_current.loc[mask, 'Срочность'] = edit_urgency
+                    df_current.loc[mask, 'Изображения Base64'] = img_b64
+                    df_current.loc[mask, 'Дата обновления'] = now_str
+
+                    if save_all_tasks(df_current):
+                        st.success("Задача обновлена!")
+                        st.rerun()
+
+            if deleted:
+                df_updated = df_current[df_current['ID'] != str(task_id)].copy()
+                # Пересчитываем сквозные ID
+                df_updated['ID'] = [str(i + 1) for i in range(len(df_updated))]
+                if save_all_tasks(df_updated):
+                    st.success("Задача удалена!")
+                    st.rerun()
+
+    # --- 3. ВЕРХНЯЯ ПАНЕЛЬ И ДОБАВЛЕНИЕ НОВОЙ ЗАДАЧИ ---
+    st.subheader("🎯 Доска задач")
+
+    if st.button("➕ Создать новую задачу", type="primary"):
+        modal_add_task()
+
+    st.write("")
+
+    # --- 4. ПОДГОТОВКА ДАННЫХ ДЛЯ КАНБАНА ИЗ GOOGLE SHEETS ---
+    kanban_data = {"Новая": [], "В работе": [], "Завершена": []}
+
+    if not tasks_df.empty:
+        for _, row in tasks_df.iterrows():
+            t_id = row.get("ID", "")
+            t_status = row.get("Status", row.get("Статус", "Новая")).strip()
             
-    with col2:
-        if st.button("🗑 Удалить", use_container_width=True):
-            del st.session_state.tasks_db[task_id]
-            st.rerun()
+            # Маппинг возможных статусов из таблицы
+            if "работ" in t_status.lower():
+                norm_status = "В работе"
+            elif "заверш" in t_status.lower() or "выполн" in t_status.lower():
+                norm_status = "Завершена"
+            else:
+                norm_status = "Новая"
 
-# --- 3. ИНТЕРФЕЙС И ФОРМА СОЗДАНИЯ ---
-st.title("🎯 Задачи")
+            t_title = row.get("Тема", "Без темы")
+            t_execs = row.get("Исполнители", "").strip()
+            
+            exec_label = f"👤 {t_execs}" if t_execs else "👤 Без исполнителя"
+            urgency_flag = "🔥 " if row.get("Срочность") == "Срочно" else ""
 
-with st.expander("➕ Добавить новую задачу"):
-    with st.form("add_new_task", clear_on_submit=True):
-        f_title = st.text_input("Название задачи")
-        f_executor = st.selectbox("Исполнитель", EXECUTORS)
-        f_desc = st.text_area("Описание")
-        
-        if st.form_submit_button("Создать задачу") and f_title.strip():
-            new_id = str(uuid.uuid4())[:6]
-            st.session_state.tasks_db[new_id] = {
-                "title": f_title.strip(),
-                "desc": f_desc.strip(),
-                "status": "Новая",
-                "executor": f_executor
-            }
-            st.rerun()
+            card_text = f"#{t_id} | {urgency_flag}{t_title} ({exec_label})"
+            kanban_data[norm_status].append(card_text)
 
-# --- 4. ПОДГОТОВКА СТИКЕРОВ ДЛЯ КАНБАНА ---
-kanban_data = {"Новая": [], "В работе": [], "Завершена": []}
+    # Структура для drag-and-drop
+    structure = [
+        {"header": "🆕 Новая", "items": kanban_data["Новая"]},
+        {"header": "⚙️ В работе", "items": kanban_data["В работе"]},
+        {"header": "✅ Завершена", "items": kanban_data["Завершена"]}
+    ]
 
-for t_id, t_info in st.session_state.tasks_db.items():
-    st_status = t_info.get("status", "Новая")
-    if st_status not in kanban_data:
-        st_status = "Новая"
-        
-    executor_name = t_info.get("executor", "Не назначен")
-    if executor_name and executor_name != "Не назначен":
-        executor_label = f"👤 {executor_name}"
-    else:
-        executor_label = "👤 Без исполнителя"
-
-    card_text = f"#{t_id} | {t_info.get('title', 'Без названия')} ({executor_label})"
-    kanban_data[st_status].append(card_text)
-
-# ⚠️ Явное объявление структуры перед вызовом sort_items
-structure = [
-    {"header": "🆕 Новая", "items": kanban_data["Новая"]},
-    {"header": "⚙️ В работе", "items": kanban_data["В работе"]},
-    {"header": "✅ Завершена", "items": kanban_data["Завершена"]}
-]
-
-# --- 5. ОТОБРАЖЕНИЕ КАНБАН-ДОСКИ ---
-sorted_res = sort_items(
-    structure, 
-    multi_containers=True, 
-    direction="vertical", 
-    key=f"kanban_board_{len(st.session_state.tasks_db)}"
-)
-
-# --- 6. КЛИК ПО КАРТОЧКЕ ДЛЯ РЕДАКТИРОВАНИЯ ---
-st.divider()
-all_tasks = st.session_state.tasks_db
-
-if all_tasks:
-    selected_task = st.selectbox(
-        "Выберите задачу для просмотра, смены исполнителя или удаления:",
-        options=list(all_tasks.keys()),
-        format_func=lambda x: f"#{x} - {all_tasks[x]['title']} | Исполнитель: {all_tasks[x].get('executor', 'Не назначен')} [{all_tasks[x].get('status', 'Новая')}]"
+    # --- 5. ОТОБРАЖЕНИЕ КАНБАН-ДОСКИ ---
+    sorted_res = sort_items(
+        structure, 
+        multi_containers=True, 
+        direction="vertical", 
+        key=f"kanban_board_{len(tasks_df)}"
     )
-    if st.button("✏️ Открыть карточку задачи"):
-        open_task_dialog(selected_task)
-else:
-    st.info("В таблице пока нет задач.")
+
+    st.divider()
+
+    # --- 6. ПРОСМОТР И РЕДАКТИРОВАНИЕ ПО ВЫБОРУ ---
+    if not tasks_df.empty:
+        col_sel, col_btn = st.columns([3, 1])
+        with col_sel:
+            task_options = tasks_df['ID'].tolist()
+            selected_task_id = st.selectbox(
+                "Выберите задачу для просмотра или редактирования:",
+                options=task_options,
+                format_func=lambda x: (
+                    f"#{x} - {tasks_df[tasks_df['ID'] == x]['Тема'].values[0]} "
+                    f"[{tasks_df[tasks_df['ID'] == x]['Статус'].values[0]}] "
+                    f"(👤 {tasks_df[tasks_df['ID'] == x]['Исполнители'].values[0]})"
+                )
+            )
+        with col_btn:
+            st.write("")
+            st.write("")
+            if st.button("✏️ Открыть карточку", use_container_width=True):
+                open_task_card_dialog(selected_task_id)
+    else:
+        st.info("В Google Таблице на листе '🎯 Задачи' пока нет записей.")
 # ==========================================
 # ВКЛАДКА 2: ОТКРЫТИЕ ГРУПП
 # ==========================================
