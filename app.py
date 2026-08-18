@@ -12,6 +12,21 @@ from streamlit_sortables import sort_items
 # ==========================================
 # 0. НАСТРОЙКА СТРАНИЦЫ И СТИЛЕЙ
 # ==========================================
+
+st.markdown("""
+    <style>
+    /* Переопределяем BlinkMacSystemFont и стандартный стек шрифтов Streamlit */
+    html, body, [class*="css"], div, span, button, input, textarea, select {
+        font-family: 'Inter', -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif !important;
+    }
+    
+    /* Дополнительно фиксируем шрифты для заголовков и карточек */
+    h1, h2, h3, h4, h5, h6, .card-task-title, .kanban-col-header {
+        font-family: 'Inter', -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 st.set_page_config(
     page_title="Мое приложение",
     page_icon="📋",
