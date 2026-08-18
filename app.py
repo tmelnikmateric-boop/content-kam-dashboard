@@ -521,6 +521,35 @@ def map_excel_columns(uploaded_df):
   }
 
 
+def load_managers_dict():
+    """Вспомогательная функция для загрузки справочника менеджеров из Google Таблицы."""
+    try:
+        gc = get_gspread_client()
+        sh = gc.open_by_url(SPREADSHEET_URL)
+        try:
+            worksheet = sh.worksheet(MANAGERS_SHEET_NAME)
+            records = worksheet.get_all_records()
+            if records:
+                df = pd.DataFrame(records).astype(str)
+                df.columns = df.columns.astype(str).str.strip()
+                # Приводим к нижнему регистру название раздела для удобного поиска без учета регистра
+                managers_map = {}
+                for _, row in df.iterrows():
+                    section = str(row.get('Название раздела', '')).strip().lower()
+                    if section:
+                        managers_map[section] = {
+                            'code': str(row.get('Цифровой код менеджера', '')).strip(),
+                            'manager': str(row.get('Менеджер', '')).strip()
+                        }
+                return managers_map
+        except gspread.WorksheetNotFound:
+            return {}
+    except Exception as e:
+        st.error(f"Ошибка загрузки листа '{MANAGERS_SHEET_NAME}': {e}")
+        return {}
+    return {}
+
+
 def append_new_products_batch(uploaded_files, progress_bar=None, status_text=None):
   try:
     gc = get_gspread_client()
@@ -530,6 +559,9 @@ def append_new_products_batch(uploaded_files, progress_bar=None, status_text=Non
     except gspread.WorksheetNotFound:
       worksheet = sh.add_worksheet(title=NEW_PRODUCTS_SHEET_NAME, rows='1000', cols='10')
       worksheet.append_row(NEW_PRODUCTS_COLUMNS)
+
+    # Загружаем карту менеджеров
+    managers_map = load_managers_dict()
 
     now_str = datetime.datetime.now().strftime('%d.%m.%Y %H:%M')
 
@@ -544,13 +576,27 @@ def append_new_products_batch(uploaded_files, progress_bar=None, status_text=Non
       raw_df = pd.read_excel(u_file, dtype=str)
       mapped_data = map_excel_columns(raw_df)
 
+      sections = mapped_data['Группа 3']
+      
+      # Подтягиваем код и имя менеджера по названию раздела
+      codes = []
+      managers = []
+      for sec in sections:
+        sec_clean = str(sec).strip().lower()
+        if sec_clean in managers_map:
+          codes.append(managers_map[sec_clean]['code'])
+          managers.append(managers_map[sec_clean]['manager'])
+        else:
+          codes.append('')
+          managers.append('')
+
       formatted_df = pd.DataFrame({
           'Внешний код': mapped_data['Внешний код'],
           'Наименование': mapped_data['Наименование'],
           'Дата создания': '',
-          'Цифровой код менеджера': '',
-          'Название раздела': mapped_data['Группа 3'],
-          'Менеджер': '',
+          'Цифровой код менеджера': codes,
+          'Название раздела': sections,
+          'Менеджер': managers,
           'Контент': '',
       })
 
