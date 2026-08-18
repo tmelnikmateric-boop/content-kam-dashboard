@@ -231,6 +231,7 @@ SHEET_MAP = {
     },
 }
 
+# Включены 'Причина паузы' и 'Дата паузы' в основной список колонок для обоих отделов
 COLUMNS = [
     'ID',                      # A - Номер по-порядку
     'Внешний код',             # B - Внешний код (из файла)
@@ -264,7 +265,7 @@ NEW_PRODUCTS_COLUMNS = [
     'Внешний код',
     'Наименование',
     'Дата создания',
-    'Цифровой код менеджера (служебное св-во) [MAIN_MNG_CODE]',
+    'Цифровой код менеджера',
     'Название раздела',
     'Менеджер',
     'Контент',
@@ -431,29 +432,6 @@ def add_contact_row(new_row_dict):
     return False
 
 
-def load_managers_mapping():
-  """Загрузка маппинга менеджеров и их цифровых кодов из листа 'Менеджеры'."""
-  try:
-    gc = get_gspread_client()
-    sh = gc.open_by_url(SPREADSHEET_URL)
-    try:
-      ws = sh.worksheet(MANAGERS_SHEET_NAME)
-      records = ws.get_all_records()
-      mapping_code = {}
-      mapping_name = {}
-      for r in records:
-        m_name = str(r.get('Менеджер', '') or r.get('ФИО', '')).strip()
-        m_code = str(r.get('Цифровой код', '') or r.get('Код', '') or r.get('MAIN_MNG_CODE', '')).strip()
-        if m_name and m_code:
-          mapping_code[m_name.lower()] = m_code
-          mapping_name[m_code] = m_name
-      return mapping_code, mapping_name
-    except Exception:
-      return {}, {}
-  except Exception:
-    return {}, {}
-
-
 def load_raw_new_products():
   try:
     gc = get_gspread_client()
@@ -540,8 +518,6 @@ def map_excel_columns(uploaded_df):
       'Внешний код': get_column_values(['внешний', 'артикул', 'код товара', 'идентификатор', 'код'], default_idx=0, clean_code=True),
       'Группа 3': get_column_values(['группа 3', 'раздел', 'категория', 'группа'], default_idx=None),
       'Наименование': get_column_values(['наименование', 'название', 'номенклатура', 'товар'], default_idx=1),
-      'Менеджер': get_column_values(['менеджер', 'ответственный', 'кам', 'фио'], default_idx=None),
-      'Код менеджера': get_column_values(['цифровой код', 'код менеджера', 'main_mng_code'], default_idx=None, clean_code=True),
   }
 
 
@@ -555,11 +531,7 @@ def append_new_products_batch(uploaded_files, progress_bar=None, status_text=Non
       worksheet = sh.add_worksheet(title=NEW_PRODUCTS_SHEET_NAME, rows='1000', cols='10')
       worksheet.append_row(NEW_PRODUCTS_COLUMNS)
 
-    now_dt = datetime.datetime.now()
-    now_str = now_dt.strftime('%d.%m.%Y %H:%M')
-    today_date_str = now_dt.strftime('%d.%m.%Y')
-
-    mng_map_code, mng_map_name = load_managers_mapping()
+    now_str = datetime.datetime.now().strftime('%d.%m.%Y %H:%M')
 
     all_rows_to_append = []
     total_files = len(uploaded_files)
@@ -572,31 +544,13 @@ def append_new_products_batch(uploaded_files, progress_bar=None, status_text=Non
       raw_df = pd.read_excel(u_file, dtype=str)
       mapped_data = map_excel_columns(raw_df)
 
-      managers_input = mapped_data.get('Менеджер', [""] * len(raw_df))
-      codes_input = mapped_data.get('Код менеджера', [""] * len(raw_df))
-
-      final_mng_codes = []
-      final_managers = []
-
-      for m_val, c_val in zip(managers_input, codes_input):
-        m_str = str(m_val).strip()
-        c_str = str(c_val).strip()
-
-        if c_str and not m_str:
-          m_str = mng_map_name.get(c_str, "")
-        elif m_str and not c_str:
-          c_str = mng_map_code.get(m_str.lower(), "")
-
-        final_managers.append(m_str)
-        final_mng_codes.append(c_str)
-
       formatted_df = pd.DataFrame({
           'Внешний код': mapped_data['Внешний код'],
           'Наименование': mapped_data['Наименование'],
-          'Дата создания': today_date_str,
-          'Цифровой код менеджера (служебное св-во) [MAIN_MNG_CODE]': final_mng_codes,
+          'Дата создания': '',
+          'Цифровой код менеджера': '',
           'Название раздела': mapped_data['Группа 3'],
-          'Менеджер': final_managers,
+          'Менеджер': '',
           'Контент': '',
       })
 
@@ -967,62 +921,94 @@ def modal_analytics():
     summary_content = build_summary(df_content)
     summary_comm = build_summary(df_comm)
 
-    with st.container(height=650):
-      new_content_sku = (
-          summary_content[summary_content['Статус группы'] == '🆕 Новый']['Количество товаров'].sum()
-          if not summary_content.empty else 0
-      )
-      new_comm_sku = (
-          summary_comm[summary_comm['Статус группы'] == '🆕 Новый']['Количество товаров'].sum()
-          if not summary_comm.empty else 0
-      )
+  with st.container(height=650):
+    new_content_sku = (
+        summary_content[summary_content['Статус группы'] == '🆕 Новый']['Количество товаров'].sum()
+        if not summary_content.empty else 0
+    )
+    new_comm_sku = (
+        summary_comm[summary_comm['Статус группы'] == '🆕 Новый']['Количество товаров'].sum()
+        if not summary_comm.empty else 0
+    )
 
-      st.markdown("<h4 style='font-weight: 500; font-size: 1.05rem; margin-bottom: 12px;'>🆕 Новые SKU на добавление</h4>", unsafe_allow_html=True)
-      
-      c1, c2, c3 = st.columns(3)
-      c1.metric('Отдел контента', f'{new_content_sku} SKU')
-      c2.metric('Коммерческий отдел', f'{new_comm_sku} SKU')
-      c3.metric('Всего новых SKU', f'{new_content_sku + new_comm_sku} SKU')
+    st.markdown("<h4 style='font-weight: 500; font-size: 1.05rem; margin-bottom: 12px;'>🆕 Новые SKU на добавление</h4>", unsafe_allow_html=True)
+    col_m1, col_m2 = st.columns(2)
+    col_m1.metric('Отдел контента', f'{new_content_sku} SKU')
+    col_m2.metric('Коммерческий отдел', f'{new_comm_sku} SKU')
+
+    st.divider()
+
+    combined_summaries = []
+    if not summary_content.empty:
+      summary_content['Отдел'] = 'Отдел контента'
+      combined_summaries.append(summary_content)
+    if not summary_comm.empty:
+      summary_comm['Отдел'] = 'Коммерческий отдел'
+      combined_summaries.append(summary_comm)
+
+    if combined_summaries:
+      all_summary = pd.concat(combined_summaries, ignore_index=True)
+
+      st.markdown("<h4 style='font-weight: 500; font-size: 1.05rem; margin-bottom: 12px;'>👤 Статистика по месяцам</h4>", unsafe_allow_html=True)
+
+      def parse_date_and_month(row):
+        date_str = str(row['Дата завершения работы']) or str(row['Дата начала работы'])
+        if date_str and len(date_str) >= 10:
+          try:
+            clean_date = date_str.split(' ')[0]
+            dt = datetime.datetime.strptime(clean_date, '%d.%m.%Y')
+            month_str = f'{MONTH_NAMES[dt.month]} {dt.year}'
+            sort_key = dt.strftime('%Y-%m')
+            return pd.Series([month_str, sort_key])
+          except Exception:
+            return pd.Series(['Неизвестно', '9999-99'])
+        return pd.Series(['Неизвестно', '9999-99'])
+
+      all_summary[['Месяц', 'Месяц_сорт']] = all_summary.apply(parse_date_and_month, axis=1)
+      exec_df = all_summary[all_summary['Исполнитель'].str.strip() != ''].copy()
+
+      if not exec_df.empty:
+        perf_df = (
+            exec_df.groupby(['Месяц_сорт', 'Месяц', 'Исполнитель'])['Количество товаров']
+            .sum().reset_index()
+        )
+        perf_df.sort_values(by=['Месяц_сорт', 'Исполнитель'], inplace=True)
+        perf_df.rename(columns={'Количество товаров': 'Количество SKU'}, inplace=True)
+
+        html_table_perf = render_grouped_html_table(
+            df=perf_df,
+            group_col='Месяц',
+            cols_order=['Месяц', 'Исполнитель', 'Количество SKU'],
+            headers=['Месяц', 'Исполнитель', 'Количество SKU'],
+        )
+        st.markdown(html_table_perf, unsafe_allow_html=True)
+      else:
+        st.info('Нет данных о выполненных файлах.')
 
       st.divider()
 
-      all_work = []
-      if not summary_content.empty:
-        cw = summary_content[summary_content['Статус группы'] == '🔄 В работе'].copy()
-        if not cw.empty:
-          cw['Отдел'] = 'Отдел контента'
-          all_work.append(cw)
+      st.markdown("<h4 style='font-weight: 500; font-size: 1.05rem; margin-bottom: 12px;'>🔄 В работе на данный момент</h4>", unsafe_allow_html=True)
+      in_work_summary = all_summary[all_summary['Статус группы'] == '🔄 В работе'].copy()
 
-      if not summary_comm.empty:
-        kw = summary_comm[summary_comm['Статус группы'] == '🔄 В работе'].copy()
-        if not kw.empty:
-          kw['Отдел'] = 'Коммерческий отдел'
-          all_work.append(kw)
-
-      st.markdown("<h4 style='font-weight: 500; font-size: 1.05rem; margin-bottom: 12px;'>⚙️ SKU в работе по исполнителям</h4>", unsafe_allow_html=True)
-
-      if all_work:
-        df_work_all = pd.concat(all_work, ignore_index=True)
-        exec_summary = (
-            df_work_all.groupby(['Исполнитель', 'Отдел'])['Количество товаров']
-            .sum()
-            .reset_index()
-            .rename(columns={'Количество товаров': 'SKU в работе'})
+      if not in_work_summary.empty:
+        work_by_exec = (
+            in_work_summary.groupby(['Исполнитель', 'Отдел'])['Количество товаров']
+            .sum().reset_index()
         )
-        exec_summary = exec_summary[exec_summary['Исполнитель'].str.strip() != '']
+        work_by_exec.sort_values(by=['Исполнитель', 'Отдел'], inplace=True)
+        work_by_exec.rename(columns={'Количество товаров': 'SKU в работе'}, inplace=True)
 
-        if not exec_summary.empty:
-          html_table_work = render_grouped_html_table(
-              exec_summary,
-              group_col='Исполнитель',
-              cols_order=['Исполнитель', 'Отдел', 'SKU в работе'],
-              headers=['Исполнитель', 'Отдел', 'SKU в работе'],
-          )
-          st.markdown(html_table_work, unsafe_allow_html=True)
-        else:
-          st.info('В данный момент нет SKU в работе.')
+        html_table_work = render_grouped_html_table(
+            df=work_by_exec,
+            group_col='Исполнитель',
+            cols_order=['Исполнитель', 'Отдел', 'SKU в работе'],
+            headers=['Исполнитель', 'Отдел', 'SKU в работе'],
+        )
+        st.markdown(html_table_work, unsafe_allow_html=True)
       else:
-        st.info('Данные отсутствуют.')
+        st.info('В данный момент нет SKU в работе.')
+    else:
+      st.info('Данные отсутствуют.')
 
 
 @st.dialog('📇 Контакты поставщиков')
@@ -1039,165 +1025,367 @@ def modal_contacts():
       with f_col4:
         name = st.text_input('Имя', placeholder='Контактное лицо')
       with f_col5:
-        product_groups = st.text_input('Группы товаров', placeholder='Перечень')
+        groups = st.text_input('Группы товаров', placeholder='Категории')
       with f_col6:
-        note = st.text_input('Примечание', placeholder='Заметки')
+        note = st.text_input('Примечание', placeholder='Доп. информация')
 
-      submit_contact = st.form_submit_button('💾 Сохранить контакт', use_container_width=True)
+      btn_submit = st.form_submit_button('Сохранить контакт', use_container_width=True)
 
-      if submit_contact:
-        if not producer.strip():
-          st.warning('Укажите наименование производителя!')
+      if btn_submit:
+        if not producer.strip() and not name.strip():
+          st.warning("Укажите хотя бы 'Производитель' или 'Имя'!")
         else:
-          new_contact_data = {
-              'Производитель': producer.strip(),
-              'Оф.сайт': site.strip(),
-              'Контакт': contact_info.strip(),
-              'Имя': name.strip(),
-              'Группы товаров': product_groups.strip(),
-              'Примечание': note.strip(),
+          new_contact = {
+              'Производитель': producer,
+              'Оф.сайт': site,
+              'Контакт': contact_info,
+              'Имя': name,
+              'Группы товаров': groups,
+              'Примечание': note,
           }
-          if add_contact_row(new_contact_data):
-            st.success('Контакт успешно сохранен!')
+          if add_contact_row(new_contact):
+            st.success('Контакт сохранен!')
             st.rerun()
 
-  st.divider()
-
   contacts_df = load_contacts_data()
+
+  col_search, _ = st.columns([2, 1])
+  with col_search:
+    search_query = st.text_input('🔍 Быстрый поиск:', '', placeholder='Введите текст для фильтрации...')
+
   if not contacts_df.empty:
-    search_q = st.text_input('🔍 Поиск по контактам:', placeholder='Введите производителя, имя или категорию...').strip().lower()
-    if search_q:
-      mask = contacts_df.apply(lambda r: r.astype(str).str.lower().str.contains(search_q).any(), axis=1)
+    if search_query.strip():
+      q = search_query.lower()
+      mask = contacts_df.apply(lambda row: row.astype(str).str.lower().str.contains(q).any(), axis=1)
       filtered_contacts = contacts_df[mask]
     else:
       filtered_contacts = contacts_df
 
-    st.dataframe(filtered_contacts, use_container_width=True, hide_index=True)
+    column_configuration = {
+        'Производитель': st.column_config.TextColumn('Производитель', width='medium'),
+        'Оф.сайт': st.column_config.TextColumn('Оф.сайт', width='small'),
+        'Контакт': st.column_config.TextColumn('Контакт', width='small'),
+        'Имя': st.column_config.TextColumn('Имя', width='small'),
+        'Группы товаров': st.column_config.TextColumn('Группы товаров', width='medium'),
+        'Примечание': st.column_config.TextColumn('Примечание', width='large'),
+    }
+
+    st.dataframe(
+        filtered_contacts,
+        use_container_width=True,
+        hide_index=True,
+        column_config=column_configuration,
+        height=480,
+    )
   else:
-    st.info('База контактов пока пуста.')
+    st.info('Контакты пока не добавлены.')
 
 
-@st.dialog('📦 Новые товары')
+@st.dialog('📦 Новые товары (Еженедельная загрузка)')
 def modal_new_products():
-  tab_upload, tab_view, tab_summary = st.tabs([
-      '📥 Загрузить партии из Excel',
-      '📋 Просмотр загруженных партий',
-      '📊 Сводная (Менеджер + Название раздела)'
-  ])
+  st.markdown("<h4 style='font-weight: 500; font-size: 1.05rem; margin-top: 5px; margin-bottom: 12px;'>📥 Загрузить файлы (пакетно)</h4>", unsafe_allow_html=True)
 
-  with tab_upload:
-    st.subheader('Загрузка Excel-файлов')
-    uploaded_files = st.file_uploader(
-        'Выберите один или несколько Excel файлов:',
-        type=['xlsx', 'xls'],
-        accept_multiple_files=True,
+  uploaded_files = st.file_uploader(
+      'Выберите .xlsx / .xls файлы',
+      type=['xlsx', 'xls'],
+      accept_multiple_files=True,
+      key='new_prod_file',
+  )
+
+  if uploaded_files:
+    if st.button(f'🚀 Добавить выгрузки в таблицу ({len(uploaded_files)})', use_container_width=True):
+      progress_bar = st.progress(0)
+      status_text = st.empty()
+      try:
+        if append_new_products_batch(uploaded_files, progress_bar, status_text):
+          status_text.success(f'Успешно добавлено файлов: {len(uploaded_files)}!')
+          st.rerun()
+      except Exception as e:
+        status_text.empty()
+        progress_bar.empty()
+        st.error(f'Ошибка обработки файлов: {e}')
+
+  st.divider()
+
+  st.markdown("<h4 style='font-weight: 500; font-size: 1.05rem; margin-bottom: 12px;'>📋 Реестр выгрузок по датам</h4>", unsafe_allow_html=True)
+
+  batches = parse_new_products_by_batches()
+
+  if batches:
+    dates_list = list(batches.keys())
+    dates_list.reverse()
+
+    selected_date = st.selectbox('📅 Выберите дату загрузки:', options=dates_list, key='select_batch_date')
+    selected_df = batches[selected_date]
+
+    st.caption(f'Всего товаров в выгрузке: **{len(selected_df)}** | Кликните по заголовку любого столбца для сортировки')
+
+    np_column_config = {
+        'Внешний код': st.column_config.TextColumn('Внешний код', width='small'),
+        'Наименование': st.column_config.TextColumn('Наименование', width='large'),
+        'Дата создания': st.column_config.TextColumn('Дата создания', width='small'),
+        'Цифровой код менеджера': st.column_config.TextColumn('Код менеджера', width='small'),
+        'Название раздела': st.column_config.TextColumn('Название раздела', width='medium'),
+        'Менеджер': st.column_config.TextColumn('Менеджер', width='medium'),
+        'Контент': st.column_config.TextColumn('Контент', width='small'),
+    }
+
+    st.dataframe(
+        selected_df,
+        use_container_width=True,
+        hide_index=True,
+        column_config=np_column_config,
+        height=450,
+    )
+  else:
+    st.info('Данные по новым товарам пока отсутствуют.')
+
+
+@st.dialog('➕ Создать новую задачу')
+def modal_add_task():
+  with st.form('create_task_form', clear_on_submit=True):
+    task_title = st.text_input('Тема задачи *', placeholder='Введите краткое название задачи')
+    
+    col1, col2 = st.columns(2)
+    with col1:
+      task_urgency = st.selectbox('Срочность:', ['Текущая задача', 'Срочно'])
+    with col2:
+      task_status = st.selectbox('Начальный статус:', ['Новая', 'В работе', 'Завершена'])
+
+    executors_input = st.text_input(
+        'Исполнитель(и) *',
+        placeholder='Укажите одного или нескольких через запятую (напр.: Анна, Иван)',
     )
 
-    if uploaded_files:
-      st.info(f'Выбрано файлов: {len(uploaded_files)}')
-      if st.button('💾 Добавить товары в таблицу', type='primary'):
-        prog_bar = st.progress(0)
-        stat_text = st.empty()
+    st.caption('Описание поддерживает Markdown (списки `- [ ] пункт` для чек-боксов)')
+    task_desc = st.text_area(
+        'Описание задачи',
+        placeholder='- [ ] Подготовить отчет\n- [ ] Проверить фото\nПодробности...',
+        height=150,
+    )
 
-        success = append_new_products_batch(uploaded_files, prog_bar, stat_text)
-        if success:
-          stat_text.empty()
-          prog_bar.empty()
-          st.success('Все партии успешно добавлены в лист "Новые товары"!')
+    uploaded_img = st.file_uploader(
+        'Прикрепить изображение',
+        type=['png', 'jpg', 'jpeg', 'webp'],
+        accept_multiple_files=False,
+    )
+
+    btn_create = st.form_submit_button('Создать задачу', use_container_width=True)
+
+    if btn_create:
+      if not task_title.strip():
+        st.warning('Заполните поле "Тема задачи"!')
+      elif not executors_input.strip():
+        st.warning('Укажите хотя бы одного исполнителя!')
+      else:
+        tasks_df = load_tasks_data()
+        next_id = str(len(tasks_df) + 1)
+        now_str = datetime.datetime.now().strftime('%d.%m.%Y %H:%M')
+
+        img_b64 = ''
+        if uploaded_img is not None:
+          bytes_data = uploaded_img.getvalue()
+          b64_str = base64.b64encode(bytes_data).decode('utf-8')
+          mime_type = uploaded_img.type
+          img_b64 = f'data:{mime_type};base64,{b64_str}'
+
+        execs_clean = ', '.join([e.strip() for e in executors_input.split(',') if e.strip()])
+
+        new_task = pd.DataFrame([{
+            'ID': next_id,
+            'Тема': task_title.strip(),
+            'Описание': task_desc.strip(),
+            'Исполнители': execs_clean,
+            'Статус': task_status,
+            'Срочность': task_urgency,
+            'Изображения Base64': img_b64,
+            'Дата создания': now_str,
+            'Дата обновления': now_str,
+        }])
+
+        updated_tasks = pd.concat([tasks_df, new_task], ignore_index=True)
+        if save_all_tasks(updated_tasks):
+          st.success('Задача успешно создана!')
           st.rerun()
 
-  with tab_view:
-    batches = parse_new_products_by_batches()
-    if not batches:
-      st.info('Нет загруженных партий новых товаров.')
-    else:
-      selected_batch_date = st.selectbox('Выберите партию для просмотра:', options=list(batches.keys()))
-      if selected_batch_date:
-        batch_df = batches[selected_batch_date]
-        st.write(f'Всего SKU в партии: **{len(batch_df)}**')
-        st.dataframe(batch_df, use_container_width=True, hide_index=True)
 
-  with tab_summary:
-    st.subheader('📊 Сводная аналитика: Менеджер + Название раздела (по датам)')
-    
-    batches = parse_new_products_by_batches()
-    if not batches:
-      st.info('Нет загруженных товаров для формирования сводной таблицы.')
-    else:
-      all_batches_list = []
-      for b_name, b_df in batches.items():
-        temp_df = b_df.copy()
-        temp_df['Партия'] = b_name
-        all_batches_list.append(temp_df)
-      
-      full_new_df = pd.concat(all_batches_list, ignore_index=True)
-      
-      col_mng = 'Менеджер'
-      col_sec = 'Название раздела'
-      col_date = 'Дата создания'
-      
-      full_new_df[col_mng] = full_new_df[col_mng].replace({'': 'Не указан'})
-      full_new_df[col_sec] = full_new_df[col_sec].replace({'': 'Не указан'})
-      full_new_df[col_date] = full_new_df[col_date].replace({'': 'Без даты'})
+@st.dialog('✏️ Редактировать задачу')
+def modal_edit_task(task_row):
+  """Модальное окно для полного редактирования выбранной задачи."""
+  t_id = task_row['ID']
 
-      c_f1, c_f2 = st.columns(2)
-      with c_f1:
-        mng_list = sorted(full_new_df[col_mng].unique().tolist())
-        sel_mngs = st.multiselect('Фильтр по менеджерам:', options=mng_list, default=mng_list)
-      with c_f2:
-        dates_list = sorted(full_new_df[col_date].unique().tolist())
-        sel_dates = st.multiselect('Фильтр по датам создания:', options=dates_list, default=dates_list)
+  with st.form(f'edit_task_form_{t_id}'):
+    edit_title = st.text_input('Тема задачи *', value=task_row['Тема'])
 
-      filtered_summary_df = full_new_df[
-          (full_new_df[col_mng].isin(sel_mngs)) & 
-          (full_new_df[col_date].isin(sel_dates))
-      ]
+    col1, col2 = st.columns(2)
+    with col1:
+      urg_options = ['Текущая задача', 'Срочно']
+      urg_index = urg_options.index(task_row['Срочность']) if task_row['Срочность'] in urg_options else 0
+      edit_urgency = st.selectbox('Срочность:', urg_options, index=urg_index)
+    with col2:
+      st_options = ['Новая', 'В работе', 'Завершена']
+      st_index = st_options.index(task_row['Статус']) if task_row['Статус'] in st_options else 0
+      edit_status = st.selectbox('Статус:', st_options, index=st_index)
 
-      if not filtered_summary_df.empty:
-        pivot_df = pd.pivot_table(
-            filtered_summary_df,
-            index=[col_mng, col_sec],
-            columns=[col_date],
-            values='Внешний код',
-            aggfunc='count',
-            fill_value=0
-        )
-        
-        pivot_df['Итого'] = pivot_df.sum(axis=1)
-        st.dataframe(pivot_df, use_container_width=True)
+    edit_executors = st.text_input(
+        'Исполнитель(и) *',
+        value=task_row['Исполнители'],
+        help='Указывайте имена через запятую',
+    )
+
+    edit_desc = st.text_area(
+        'Описание задачи',
+        value=task_row['Описание'],
+        height=150,
+    )
+
+    if task_row['Изображения Base64']:
+      st.markdown('**Текущее изображение:**')
+      st.image(task_row['Изображения Base64'], width=250)
+
+    uploaded_img = st.file_uploader(
+        'Заменить / прикрепить новое изображение',
+        type=['png', 'jpg', 'jpeg', 'webp'],
+        accept_multiple_files=False,
+        key=f'edit_img_{t_id}',
+    )
+
+    btn_update = st.form_submit_button('Сохранить изменения', use_container_width=True)
+
+    if btn_update:
+      if not edit_title.strip():
+        st.warning('Заполните поле "Тема задачи"!')
+      elif not edit_executors.strip():
+        st.warning('Укажите хотя бы одного исполнителя!')
       else:
-        st.info('По выбранным фильтрам данные отсутствуют.')
+        tasks_df = load_tasks_data()
+        now_str = datetime.datetime.now().strftime('%d.%m.%Y %H:%M')
+
+        # Обработка картинки
+        img_b64 = task_row['Изображения Base64']
+        if uploaded_img is not None:
+          bytes_data = uploaded_img.getvalue()
+          b64_str = base64.b64encode(bytes_data).decode('utf-8')
+          mime_type = uploaded_img.type
+          img_b64 = f'data:{mime_type};base64,{b64_str}'
+
+        execs_clean = ', '.join([e.strip() for e in edit_executors.split(',') if e.strip()])
+
+        mask = tasks_df['ID'] == t_id
+        tasks_df.loc[mask, 'Тема'] = edit_title.strip()
+        tasks_df.loc[mask, 'Описание'] = edit_desc.strip()
+        tasks_df.loc[mask, 'Исполнители'] = execs_clean
+        tasks_df.loc[mask, 'Статус'] = edit_status
+        tasks_df.loc[mask, 'Срочность'] = edit_urgency
+        tasks_df.loc[mask, 'Изображения Base64'] = img_b64
+        tasks_df.loc[mask, 'Дата обновления'] = now_str
+
+        if save_all_tasks(tasks_df):
+          st.success('Задача успешно обновлена!')
+          st.rerun()
 
 
 # ==========================================
-# 5. ОСНОВНОЙ ИНТЕРФЕЙС ПРИЛОЖЕНИЯ
+# 5. ОСНОВНОЙ ИНТЕРФЕЙС STREAMLIT
 # ==========================================
-def main():
-  st.markdown("<h1 class='custom-header'>📋 Панель управления обработкой файлов</h1>", unsafe_allow_html=True)
 
-  main_tab1, main_tab2 = st.tabs(['🗂️ Обработка файлов по отделам', '🎯 Центр Задач'])
+# 1. Заголовок
+st.markdown("<h2 class='custom-header'>Панель управления отдела контента</h2>", unsafe_allow_html=True)
 
-  with main_tab1:
+# 2. Три главные вкладки
+main_tab1, main_tab2, main_tab3 = st.tabs([
+    "📥 Добавление товаров",
+    "📂 Открытие новых групп",
+    "🎯 Задачи"
+])
+
+# ------------------------------------------
+# ВКЛАДКА 1: ДОБАВЛЕНИЕ ТОВАРОВ
+# ------------------------------------------
+with main_tab1:
     dept = st.radio(
         'Выберите отдел:',
-        options=list(SHEET_MAP.keys()),
+        options=['Отдел контента', 'Коммерческий отдел'],
         horizontal=True,
-        key='radio_dept_select',
+        label_visibility='collapsed',
     )
 
     dept_info = SHEET_MAP[dept]
 
-    with st.spinner(f'Загрузка данных ({dept})...'):
-      df = load_dept_data(dept_info['data'])
-      summary_df = build_summary(df)
+    # Загружаем сырые данные из Гугл Таблицы
+    df = load_dept_data(dept_info['data'])
 
-    st.subheader('⚡ Управление файлами')
+    # Динамически рассчитываем сводку
+    summary_df = build_summary(df)
 
-    col_actions, col_extra = st.columns([1.5, 1.0])
+    st.divider()
+
+    col_upload, col_actions, col_extra = st.columns([1.2, 1.8, 1.3])
+
+    with col_upload:
+      st.subheader(f'1. Загрузка файлов ({dept.lower()})')
+      uploaded_files = st.file_uploader(
+          f'Выберите .xlsx / .xls файлы для {dept.lower()}',
+          type=['xlsx', 'xls'],
+          accept_multiple_files=True,
+      )
+      if uploaded_files:
+        if st.button(f'Загрузить файлы ({len(uploaded_files)})', use_container_width=True):
+          now_str = datetime.datetime.now().strftime('%d.%m.%Y %H:%M:%S')
+          all_dfs = []
+          total_files = len(uploaded_files)
+
+          progress_bar = st.progress(0)
+          status_text = st.empty()
+
+          try:
+            for idx, u_file in enumerate(uploaded_files):
+              status_text.info(f'Чтение файла {idx + 1} из {total_files}: **{u_file.name}**')
+
+              u_file.seek(0)
+              raw_uploaded_df = pd.read_excel(u_file, dtype=str)
+
+              mapped_data = map_excel_columns(raw_uploaded_df)
+              num_rows = len(mapped_data['Внешний код'])
+
+              if num_rows > 0:
+                uploaded_df = pd.DataFrame({
+                    'ID': [''] * num_rows,
+                    'Внешний код': mapped_data['Внешний код'],
+                    'Группа 3': mapped_data['Группа 3'],
+                    'Наименование': mapped_data['Наименование'],
+                    'Статус': ['🆕 Новый'] * num_rows,
+                    'Причина паузы': [''] * num_rows,
+                    'Дата паузы': [''] * num_rows,
+                    'Исполнитель': [''] * num_rows,
+                    'Дата взятия': [''] * num_rows,
+                    'Дата выполнения': [''] * num_rows,
+                    'Дата завершения работы': [''] * num_rows,
+                    'Источник': [u_file.name] * num_rows,
+                    'Дата загрузки': [now_str] * num_rows,
+                })
+
+                all_dfs.append(uploaded_df[COLUMNS])
+              progress_bar.progress(int(((idx + 1) / total_files) * 60))
+
+            if all_dfs:
+              status_text.info('Сохранение и запись данных в Google Таблицу...')
+              combined_df = pd.concat(all_dfs, ignore_index=True)
+
+              progress_bar.progress(80)
+              if save_dept_data(dept_info, combined_df):
+                progress_bar.progress(100)
+                status_text.success(f'Успешно загружено файлов: {total_files}!')
+                st.rerun()
+
+          except Exception as e:
+            status_text.empty()
+            progress_bar.empty()
+            st.error(f'Ошибка обработки файлов: {e}')
 
     with col_actions:
-      st.subheader('1-2. Операции с файлами')
-      st.write('Изменение статусов выбранных файлов:')
+      st.subheader('2. Управление статусами')
+      st.write('Выберите действие по файлам:')
 
       btn_col1, btn_col2, btn_col3, btn_col4 = st.columns(4)
 
@@ -1249,89 +1437,83 @@ def main():
 
       with tab_new:
         if new_df.empty:
-          st.info('Нет новых файлов.')
+          st.info('Нет новых групп.')
         else:
-          cols_show = ['Имя файла', 'Группа 3', 'Количество товаров', 'Дата добавления', 'Дней с добавления']
-          st.dataframe(new_df[cols_show], use_container_width=True, hide_index=True)
+          cols_new = [c for c in ['Имя файла', 'Группа 3', 'Количество товаров', 'Дата добавления', 'Дней с добавления'] if c in new_df.columns]
+          st.dataframe(new_df[cols_new], use_container_width=True, hide_index=True)
 
       with tab_paused:
         if paused_df.empty:
-          st.info('Нет файлов на паузе.')
+          st.info('Нет групп на паузе.')
         else:
-          cols_show = ['Имя файла', 'Группа 3', 'Количество товаров', 'Причина паузы', 'Дата паузы', 'Исполнитель']
-          st.dataframe(paused_df[cols_show], use_container_width=True, hide_index=True)
+          cols_paused = [c for c in ['Имя файла', 'Группа 3', 'Количество товаров', 'Исполнитель', 'Дата паузы', 'Причина паузы'] if c in paused_df.columns]
+          st.dataframe(paused_df[cols_paused], use_container_width=True, hide_index=True)
 
       with tab_work:
         if work_df.empty:
-          st.info('Нет файлов в работе.')
+          st.info('Нет групп в работе.')
         else:
-          cols_show = ['Имя файла', 'Группа 3', 'Количество товаров', 'Исполнитель', 'Дата начала работы']
-          st.dataframe(work_df[cols_show], use_container_width=True, hide_index=True)
+          cols_work = [c for c in ['Имя файла', 'Группа 3', 'Количество товаров', 'Исполнитель', 'Дата начала работы'] if c in work_df.columns]
+          st.dataframe(work_df[cols_work], use_container_width=True, hide_index=True)
 
-      st.divider()
+      st.write('')
 
-      with st.expander(f'✅ Выполненные файлы ({len(completed_summary)})', expanded=False):
+      if 'show_completed' not in st.session_state:
+        st.session_state.show_completed = False
+
+      btn_label = (
+          '🙈 Скрыть завершенные группы'
+          if st.session_state.show_completed
+          else f'📂 Посмотреть завершенные группы ({len(completed_summary)})'
+      )
+
+      if st.button(btn_label):
+        st.session_state.show_completed = not st.session_state.show_completed
+        st.rerun()
+
+      if st.session_state.show_completed:
+        st.markdown('---')
+        st.subheader(f'✅ Завершенные группы ({len(completed_summary)})')
         if completed_summary.empty:
-          st.info('Нет выполненных файлов.')
+          st.info('Завершенных групп пока нет.')
         else:
-          cols_show = ['Имя файла', 'Группа 3', 'Количество товаров', 'Исполнитель', 'Дата начала работы', 'Дата завершения работы']
-          st.dataframe(completed_summary[cols_show], use_container_width=True, hide_index=True)
+          cols_completed = [c for c in ['Имя файла', 'Группа 3', 'Количество товаров', 'Исполнитель', 'Дата начала работы', 'Дата завершения работы'] if c in completed_summary.columns]
+          st.dataframe(completed_summary[cols_completed], use_container_width=True, hide_index=True)
 
-  with main_tab2:
-    st.subheader('🎯 Центр управления задачами')
+st.link_button(
+    "📥 Загруженные данные контента",
+    "https://docs.google.com/spreadsheets/d/1vCZQgzBPv8uahr8ckRI1f-TA_QS6Afz2B9NP_ZMj6ek/edit?gid=59376984#gid=59376984",
+    type="secondary",
+    use_container_width=False,
+)
+st.link_button(
+    "📥 Загруженные данные КАМ",
+    "https://docs.google.com/spreadsheets/d/1vCZQgzBPv8uahr8ckRI1f-TA_QS6Afz2B9NP_ZMj6ek/edit?gid=183144046#gid=183144046",
+    type="secondary",
+    use_container_width=False,
+)
 
-    tasks_df = load_tasks_data()
-
-    with st.expander('➕ Создать новую задачу', expanded=False):
-      with st.form('create_task_form', clear_on_submit=True):
-        t_title = st.text_input('Тема задачи *')
-        t_desc = st.text_area('Описание задачи')
-        t_execs = st.text_input('Исполнители (через запятую)')
-        t_urgency = st.selectbox('Срочность', options=['Обычная', 'Срочно'])
-        
-        uploaded_imgs = st.file_uploader('Прикрепить изображения', type=['png', 'jpg', 'jpeg'], accept_multiple_files=True)
-
-        submit_task = st.form_submit_button('💾 Сохранить задачу')
-
-        if submit_task:
-          if not t_title.strip():
-            st.warning('Заполните тему задачи!')
-          else:
-            img_b64_list = []
-            if uploaded_imgs:
-              for img_file in uploaded_imgs:
-                bytes_data = img_file.read()
-                b64_str = base64.b64encode(bytes_data).decode('utf-8')
-                img_b64_list.append(b64_str)
-
-            now_str = datetime.datetime.now().strftime('%d.%m.%Y %H:%M')
-            new_id = str(len(tasks_df) + 1)
-
-            new_task_row = {
-                'ID': new_id,
-                'Тема': t_title.strip(),
-                'Описание': t_desc.strip(),
-                'Исполнители': t_execs.strip(),
-                'Статус': '🆕 Новая',
-                'Срочность': t_urgency,
-                'Изображения Base64': '||'.join(img_b64_list),
-                'Дата создания': now_str,
-                'Дата обновления': now_str,
-            }
-
-            new_tasks_df = pd.concat([tasks_df, pd.DataFrame([new_task_row])], ignore_index=True)
-            if save_all_tasks(new_tasks_df):
-              st.success('Задача успешно создана!')
-              st.rerun()
+# ------------------------------------------
+# ВКЛАДКА 3: ЗАДАЧИ
+# ------------------------------------------
+with main_tab3:
+    col_t_title, col_t_btn = st.columns([3, 1])
+    with col_t_title:
+      st.subheader('🎯 Менеджер задач')
+    with col_t_btn:
+      if st.button('➕ Добавить задачу', use_container_width=True):
+        modal_add_task()
 
     st.divider()
 
+    tasks_df = load_tasks_data()
+
     if tasks_df.empty:
-      st.info('Список задач пуст.')
+      st.info('Задач пока нет. Нажмите «Добавить задачу», чтобы создать первую.')
     else:
-      new_tasks = tasks_df[tasks_df['Статус'] == '🆕 Новая']
-      work_tasks = tasks_df[tasks_df['Статус'] == '🔄 В работе']
-      done_tasks = tasks_df[tasks_df['Статус'] == '✅ Завершена']
+      new_tasks = tasks_df[tasks_df['Статус'] == 'Новая']
+      work_tasks = tasks_df[tasks_df['Статус'] == 'В работе']
+      done_tasks = tasks_df[tasks_df['Статус'] == 'Завершена']
 
       t_tab1, t_tab2, t_tab3 = st.tabs([
           f'🆕 Новые ({len(new_tasks)})',
@@ -1350,61 +1532,495 @@ def main():
         t_date = row['Дата создания']
 
         is_urgent = t_urgency == 'Срочно'
-        badge_html = f"<span class='urgent-badge'>🔥 {t_urgency}</span>" if is_urgent else f"<span class='normal-badge'>📌 {t_urgency}</span>"
+        badge_html = (
+            f"<span class='urgent-badge'>🔥 {t_urgency}</span>"
+            if is_urgent
+            else f"<span class='normal-badge'>📌 {t_urgency}</span>"
+        )
         bubbles_html = render_executor_bubbles(t_execs)
 
-        with st.container(border=True):
-          c1, c2 = st.columns([3, 1])
-          with c1:
-            st.markdown(f"### #{t_id} {t_title}")
-            st.markdown(f"**Создана:** {t_date} | {badge_html}", unsafe_allow_html=True)
-            st.markdown(f"**Исполнители:**", unsafe_allow_html=True)
+        with st.expander(f"#{t_id} | {t_title}", expanded=False):
+          col_info, col_edit_btn = st.columns([3, 1])
+
+          with col_info:
+            st.markdown(f"**Срочность:** {badge_html}", unsafe_allow_html=True)
+            st.markdown("**Исполнители:**", unsafe_allow_html=True)
             st.markdown(bubbles_html, unsafe_allow_html=True)
-            if t_desc:
-              st.markdown(f"**Описание:**\n{t_desc}")
+            st.caption(f"Дата создания: {t_date}")
 
-            if t_img:
-              images = t_img.split('||')
-              st.markdown("**Прикрепленные изображения:**")
-              img_cols = st.columns(min(len(images), 4))
-              for i_idx, img_b64 in enumerate(images):
-                if img_b64.strip():
-                  with img_cols[i_idx % 4]:
-                    st.image(f"data:image/png;base64,{img_b64}")
+          with col_edit_btn:
+            if st.button('✏️ Редактировать', key=f'btn_modal_edit_{t_id}', use_container_width=True):
+              modal_edit_task(row)
 
-          with c2:
-            st.markdown(f"**Текущий статус:** {t_status}")
-            new_status = st.selectbox('Изменить статус:', options=['🆕 Новая', '🔄 В работе', '✅ Завершена'], index=['🆕 Новая', '🔄 В работе', '✅ Завершена'].index(t_status) if t_status in ['🆕 Новая', '🔄 В работе', '✅ Завершена'] else 0, key=f"sel_status_{t_id}")
-            
-            if new_status != t_status:
-              if st.button('Сохранить', key=f"btn_save_st_{t_id}"):
-                tasks_df.loc[tasks_df['ID'] == t_id, 'Статус'] = new_status
-                tasks_df.loc[tasks_df['ID'] == t_id, 'Дата обновления'] = datetime.datetime.now().strftime('%d.%m.%Y %H:%M')
-                if save_all_tasks(tasks_df):
-                  st.success('Статус обновлен!')
-                  st.rerun()
+          st.divider()
+
+          if t_desc:
+            st.markdown("**Описание:**")
+            st.markdown(t_desc)
+
+          if t_img:
+            st.write('')
+            st.image(t_img, caption='Прикрепленное изображение', width=350)
+
+          st.divider()
+
+          c_sel, c_sav = st.columns([2, 1])
+          with c_sel:
+            new_st = st.selectbox(
+                'Быстрая смена статуса:',
+                ['Новая', 'В работе', 'Завершена'],
+                index=['Новая', 'В работе', 'Завершена'].index(t_status) if t_status in ['Новая', 'В работе', 'Завершена'] else 0,
+                key=f'status_sel_{t_id}',
+            )
+          with c_sav:
+            st.write('')
+            st.write('')
+            if st.button('Сохранить статус', key=f'btn_save_status_{t_id}'):
+              tasks_df.loc[tasks_df['ID'] == t_id, 'Статус'] = new_st
+              tasks_df.loc[tasks_df['ID'] == t_id, 'Дата обновления'] = datetime.datetime.now().strftime('%d.%m.%Y %H:%M')
+              if save_all_tasks(tasks_df):
+                st.success('Статус задачи сохранен!')
+                st.rerun()
 
       with t_tab1:
         if new_tasks.empty:
-          st.info('Нет новых задач.')
+          st.info('Новых задач нет.')
         else:
-          for _, row in new_tasks.iterrows():
-            render_task_card(row)
+          for _, task_row in new_tasks.iterrows():
+            render_task_card(task_row)
 
       with t_tab2:
         if work_tasks.empty:
-          st.info('Нет задач в работе.')
+          st.info('Задач в работе нет.')
         else:
-          for _, row in work_tasks.iterrows():
-            render_task_card(row)
+          for _, task_row in work_tasks.iterrows():
+            render_task_card(task_row)
 
       with t_tab3:
         if done_tasks.empty:
-          st.info('Нет завершенных задач.')
+          st.info('Завершенных задач нет.')
         else:
-          for _, row in done_tasks.iterrows():
-            render_task_card(row)
+          for _, task_row in done_tasks.iterrows():
+            render_task_card(task_row)
+
+# ==========================================
+# ВКЛАДКА 2: ОТКРЫТИЕ ГРУПП
+# ==========================================
+
+def clean_number_str(val):
+  """Убирает .0, float-мусор и форматирует числа безопасно для Pandas Series"""
+  if isinstance(val, (pd.Series, list, tuple)):
+    return val
+
+  if pd.isna(val) or val is None:
+    return ""
+
+  s = str(val).strip()
+  if not s or s.lower() in ["nan", "none", "<na>", "nat"]:
+    return ""
+
+  if s.endswith(".0"):
+    return s[:-2]
+
+  try:
+    f = float(s)
+    if f.is_integer():
+      return str(int(f))
+    return str(f)
+  except ValueError:
+    return s
 
 
-if __name__ == '__main__':
-  main()
+@st.cache_data(ttl=300)
+def load_all_sheet_data():
+  """Загружает основные данные и справочники VLOOKUP"""
+  sheet_id = "1LABW3U4TdX6cDjps_g_mBBsWRW8_Xx7W8LqBZB4CO2g"
+
+  try:
+    gc = get_gspread_client()
+    sh = gc.open_by_key(sheet_id)
+
+    ws_main = sh.worksheet("Вывод групп")
+    vals_main = ws_main.get_all_values()
+
+    if len(vals_main) <= 1:
+      df_main = pd.DataFrame()
+    else:
+      headers = [str(h).strip() for h in vals_main[0]]
+      df_main = pd.DataFrame(vals_main[1:], columns=headers).astype(str)
+
+    dict_materik = {}
+    try:
+      ws_mat = sh.worksheet("Материк статус")
+      vals_mat = ws_mat.get_all_values()
+      if len(vals_mat) > 1:
+        for row in vals_mat[1:]:
+          if len(row) >= 2 and str(row[0]).strip():
+            key = str(row[0]).strip().lower()
+            dict_materik[key] = clean_number_str(row[1])
+    except Exception:
+      pass
+
+    dict_palas = {}
+    try:
+      ws_pal = sh.worksheet("Палас статус")
+      vals_pal = ws_pal.get_all_values()
+      if len(vals_pal) > 1:
+        for row in vals_pal[1:]:
+          if len(row) >= 2 and str(row[0]).strip():
+            key = str(row[0]).strip().lower()
+            dict_palas[key] = clean_number_str(row[1])
+    except Exception:
+      pass
+
+    return df_main, dict_materik, dict_palas
+
+  except Exception as e:
+    st.error(f"Ошибка загрузки данных из Google Таблицы: {e}")
+    return pd.DataFrame(), {}, {}
+
+
+@st.cache_data(ttl=300)
+def load_group_order_data():
+  """Загружает данные с листа 'Порядок расположения групп на сайте'"""
+  sheet_id = "1LABW3U4TdX6cDjps_g_mBBsWRW8_Xx7W8LqBZB4CO2g"
+  try:
+    gc = get_gspread_client()
+    sh = gc.open_by_key(sheet_id)
+    ws = sh.worksheet("Порядок расположения групп на сайте")
+    vals = ws.get_all_values()
+
+    if not vals or len(vals) <= 1:
+      return pd.DataFrame()
+
+    raw_headers = [str(h).strip() for h in vals[0]]
+
+    headers = []
+    seen = {}
+    for idx, h in enumerate(raw_headers):
+      h_name = h if h else f"Столбец_{idx+1}"
+      if h_name in seen:
+        seen[h_name] += 1
+        headers.append(f"{h_name}_{seen[h_name]}")
+      else:
+        seen[h_name] = 0
+        headers.append(h_name)
+
+    df_order = pd.DataFrame(vals[1:], columns=headers).astype(str)
+
+    for col in df_order.columns:
+      df_order[col] = df_order[col].map(clean_number_str)
+
+    return df_order.reset_index(drop=True)
+
+  except Exception as e:
+    st.error(
+        f"Ошибка загрузки листа 'Порядок расположения групп на сайте': {e}"
+    )
+    return pd.DataFrame()
+
+
+def save_groups_data(df_to_save):
+  """Сохраняет измененный DataFrame в Google Таблицу"""
+  sheet_id = "1LABW3U4TdX6cDjps_g_mBBsWRW8_Xx7W8LqBZB4CO2g"
+  try:
+    gc = get_gspread_client()
+    sh = gc.open_by_key(sheet_id)
+    ws = sh.worksheet("Вывод групп")
+
+    values_to_write = [df_to_save.columns.tolist()] + df_to_save.fillna(
+        ""
+    ).values.tolist()
+
+    ws.clear()
+    ws.update("A1", values_to_write)
+    st.cache_data.clear()
+    return True
+  except Exception as e:
+    st.error(f"Ошибка сохранения: {e}")
+    return False
+
+
+@st.dialog("✏️ Редактирование / Добавление группы", width="large")
+def group_editor_dialog(row_data, row_index, full_df, dict_materik, dict_palas):
+  is_new = row_index is None
+
+  with st.form("group_edit_form"):
+    col1, col2, col3 = st.columns(3)
+    with col1:
+      g1 = st.text_input(
+          "Группа 1", value=row_data.get("Группа 1", "") if not is_new else ""
+      )
+    with col2:
+      g2 = st.text_input(
+          "Группа 2", value=row_data.get("Группа 2", "") if not is_new else ""
+      )
+    with col3:
+      g3 = st.text_input(
+          "Группа 3", value=row_data.get("Группа 3", "") if not is_new else ""
+      )
+
+    grp_key = str(g3).strip().lower()
+    mat_val = dict_materik.get(
+        grp_key, row_data.get("Влючено Материк", "") if not is_new else ""
+    )
+    pal_val = dict_palas.get(
+        grp_key, row_data.get("Включено Палас", "") if not is_new else ""
+    )
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+      manager = st.text_input(
+          "Менеджер", value=row_data.get("Менеджер", "") if not is_new else ""
+      )
+    with col2:
+      st.text_input("Влючено Материк (авто)", value=mat_val, disabled=True)
+    with col3:
+      st.text_input("Включено Палас (авто)", value=pal_val, disabled=True)
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+      sku = st.text_input(
+          "Количество скю",
+          value=row_data.get("Количество скю", "") if not is_new else "",
+      )
+    with col2:
+      d_start = st.text_input(
+          "Дата начала работ",
+          value=row_data.get("Дата начала работ", "") if not is_new else "",
+      )
+    with col3:
+      d_req = st.text_input(
+          "Отправка КМ запроса на сайты-доноры",
+          value=(
+              row_data.get("Отправка КМ запроса на сайты-доноры", "")
+              if not is_new
+              else ""
+          ),
+      )
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+      d_donor = st.text_input(
+          "Дата получения сайтов доноров",
+          value=(
+              row_data.get("Дата получения сайтов доноров", "")
+              if not is_new
+              else ""
+          ),
+      )
+    with col2:
+      d_sogl_send = st.text_input(
+          "Дата отправки на согласование",
+          value=(
+              row_data.get("Дата отправки на согласование", "")
+              if not is_new
+              else ""
+          ),
+      )
+    with col3:
+      d_sogl = st.text_input(
+          "Дата согласования",
+          value=row_data.get("Дата согласования", "") if not is_new else "",
+      )
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+      d_release = st.text_input(
+          "Дата вывода на Материк (с товарами)",
+          value=(
+              row_data.get("Дата вывода на Материк (с товарами)", "")
+              if not is_new
+              else ""
+          ),
+      )
+    with col2:
+      palas_alloc = st.text_input(
+          "Выделено на сайт Палас",
+          value=(
+              row_data.get("Выделено на сайт Палас", "") if not is_new else ""
+          ),
+      )
+    with col3:
+      kam_file = st.text_input(
+          "Добавлено в файл КАМ",
+          value=(
+              row_data.get("Добавлено в файл КАМ", "") if not is_new else ""
+          ),
+      )
+
+    submitted = st.form_submit_button("💾 Сохранить")
+
+    if submitted:
+      new_row = {
+          "Группа 1": g1,
+          "Группа 2": g2,
+          "Группа 3": g3,
+          "Менеджер": manager,
+          "Влючено Материк": mat_val,
+          "Включено Палас": pal_val,
+          "Количество скю": clean_number_str(sku),
+          "Дата начала работ": d_start,
+          "Отправка КМ запроса на сайты-доноры": d_req,
+          "Дата получения сайтов доноров": d_donor,
+          "Дата отправки на согласование": d_sogl_send,
+          "Дата согласования": d_sogl,
+          "Дата вывода на Материк (с товарами)": d_release,
+          "Выделено на сайт Палас": palas_alloc,
+          "Добавлено в файл КАМ": kam_file,
+      }
+
+      df_updated = full_df.copy()
+      if is_new:
+        df_updated = pd.concat(
+            [df_updated, pd.DataFrame([new_row])], ignore_index=True
+        )
+      else:
+        for k, v in new_row.items():
+          df_updated.at[row_index, k] = v
+
+      if save_groups_data(df_updated):
+        st.success("Данные успешно сохранены!")
+        st.rerun()
+
+
+@st.dialog("📌 Порядок расположения групп на сайте", width="large")
+def show_group_order_dialog():
+  df_order = load_group_order_data()
+  if not df_order.empty:
+    st.dataframe(df_order, use_container_width=True, height=500)
+  else:
+    st.info("Информация на листе отсутствует или не найдена.")
+
+
+with main_tab2:
+  st.subheader("📋 Вывод групп")
+
+  df_raw, dict_materik, dict_palas = load_all_sheet_data()
+
+  target_columns = [
+      "Группа 1",
+      "Группа 2",
+      "Группа 3",
+      "Менеджер",
+      "Влючено Материк",
+      "Включено Палас",
+      "Количество скю",
+      "Дата начала работ",
+      "Отправка КМ запроса на сайты-доноры",
+      "Дата получения сайтов доноров",
+      "Дата отправки на согласование",
+      "Дата согласования",
+      "Дата вывода на Материк (с товарами)",
+      "Выделено на сайт Палас",
+      "Добавлено в файл КАМ",
+  ]
+
+  if not df_raw.empty:
+    for col in target_columns:
+      if col not in df_raw.columns:
+        df_raw[col] = ""
+
+    df_proc = df_raw[target_columns].copy()
+
+    for col in df_proc.columns:
+      df_proc[col] = df_proc[col].map(clean_number_str)
+
+    def apply_vlookup(row):
+      grp = str(row["Группа 3"]).strip().lower()
+      if grp:
+        if grp in dict_materik:
+          row["Влючено Материк"] = dict_materik[grp]
+        if grp in dict_palas:
+          row["Включено Палас"] = dict_palas[grp]
+      return row
+
+    df_proc = df_proc.apply(apply_vlookup, axis=1)
+
+    if st.button("➕ Добавить новую группу", type="primary"):
+      group_editor_dialog({}, None, df_proc, dict_materik, dict_palas)
+
+    kam_col = "Добавлено в файл КАМ"
+    date_col = "Дата вывода на Материк (с товарами)"
+
+    kam_series = df_proc[kam_col].astype(str).str.strip()
+    date_series = df_proc[date_col].astype(str).str.strip()
+
+    mask_released = (kam_series.str.lower() == "добавлено") & (
+        date_series != ""
+    )
+    mask_add_file = (kam_series != "") & (kam_series.str.lower() != "добавлено")
+    mask_in_progress = ~mask_released & ~mask_add_file
+
+    df_in_progress = df_proc[mask_in_progress]
+    df_released = df_proc[mask_released]
+    df_add_file = df_proc[mask_add_file]
+
+    sub_tab1, sub_tab2, sub_tab3 = st.tabs([
+        f"В работе ({len(df_in_progress)})",
+        f"Выведены ({len(df_released)})",
+        f"Добавить в файл ({len(df_add_file)})",
+    ])
+
+    def render_groups_table_with_actions(df_subset, tab_key):
+      if df_subset.empty:
+        st.info("Нет данных в этом разделе.")
+      else:
+        cols_to_show = df_subset.columns.tolist()
+        headers_html = "<th>Действие</th>" + "".join(
+            [f"<th>{c}</th>" for c in cols_to_show]
+        )
+
+        rows_html = []
+        for idx, row in df_subset.iterrows():
+          edit_btn_html = (
+              f"<td><a href='?edit_id={idx}' target='_self'"
+              " style='text-decoration: none;'>✏️ Edit</a></td>"
+          )
+          cells = "".join([f"<td>{row[c]}</td>" for c in cols_to_show])
+          rows_html.append(f"<tr>{edit_btn_html}{cells}</tr>")
+
+        table_html = f"""
+                <div class="groups-table-container">
+                    <table class="groups-table">
+                        <thead><tr>{headers_html}</tr></thead>
+                        <tbody>{"".join(rows_html)}</tbody>
+                    </table>
+                </div>
+                """
+        st.markdown(table_html, unsafe_allow_html=True)
+
+      st.markdown("---")
+      if st.button(
+          "📌 Посмотреть порядок расположения групп на сайте",
+          key=f"btn_order_{tab_key}",
+      ):
+        show_group_order_dialog()
+
+    query_params = st.query_params
+    if "edit_id" in query_params:
+      try:
+        edit_idx = int(query_params["edit_id"])
+        st.query_params.clear()
+        if edit_idx in df_proc.index:
+          group_editor_dialog(
+              df_proc.loc[edit_idx].to_dict(),
+              edit_idx,
+              df_proc,
+              dict_materik,
+              dict_palas,
+          )
+      except Exception:
+        pass
+
+    with sub_tab1:
+      render_groups_table_with_actions(df_in_progress, "in_prog")
+
+    with sub_tab2:
+      render_groups_table_with_actions(df_released, "rel")
+
+    with sub_tab3:
+      render_groups_table_with_actions(df_add_file, "add_f")
+
+  else:
+    st.warning("Не удалось загрузить данные из таблицы.")
