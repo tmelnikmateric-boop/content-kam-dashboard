@@ -6,7 +6,8 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 from urllib.parse import quote
-
+import streamlit as st
+from streamlit_sortables import sort_items
 
 # ==========================================
 # 0. НАСТРОЙКА СТРАНИЦЫ И СТИЛЕЙ
@@ -1676,112 +1677,78 @@ st.link_button(
 # ------------------------------------------
 # ВКЛАДКА 3: ЗАДАЧИ
 # ------------------------------------------
-with main_tab3:
-    col_t_title, col_t_btn = st.columns([3, 1])
-    with col_t_title:
-      st.subheader('🎯 Менеджер задач')
-    with col_t_btn:
-      if st.button('➕ Добавить задачу', use_container_width=True):
-        modal_add_task()
 
-    st.divider()
+# --- ИНИЦИАЛИЗАЦИЯ СОСТОЯНИЯ ---
+if "tasks" not in st.session_state:
+    st.session_state.tasks = {
+        "Новая": ["📌 Дизайн главной", "📌 ТЗ для копирайтера"],
+        "В работе": ["⚡ Верстка карточек", "⚡ Настройка SEO"],
+        "Завершена": ["✅ Анализ конкурентов"]
+    }
 
-    tasks_df = load_tasks_data()
+# --- ПОЛЬЗОВАТЕЛЬСКИЕ СТИЛИ ДЛЯ СТИКЕРОВ ---
+st.markdown("""
+<style>
+    /* Стиль колонок канбана */
+    .sortable-container {
+        background-color: #f4f5f7;
+        border-radius: 8px;
+        padding: 12px;
+    }
+    
+    /* Стиль стикеров (карточек) */
+    .sortable-item {
+        background-color: #fff9c4 !important; /* Желтый цвет стикера */
+        color: #333333 !important;
+        font-weight: 500 !important;
+        border-left: 5px solid #fbc02d !important;
+        border-radius: 6px !important;
+        padding: 10px 14px !important;
+        margin-bottom: 8px !important;
+        box-shadow: 2px 2px 5px rgba(0,0,0,0.1) !important;
+        cursor: grab !important;
+    }
+    
+    .sortable-item:active {
+        cursor: grabbing !important;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-    if tasks_df.empty:
-      st.info('Задач пока нет. Нажмите «Добавить задачу», чтобы создать первую.')
-    else:
-      new_tasks = tasks_df[tasks_df['Статус'] == 'Новая']
-      work_tasks = tasks_df[tasks_df['Статус'] == 'В работе']
-      done_tasks = tasks_df[tasks_df['Статус'] == 'Завершена']
+# --- ИНТЕРФЕЙС ВКЛАДКИ ---
+st.title("📋 Канбан-доска задач")
 
-      t_tab1, t_tab2, t_tab3 = st.tabs([
-          f'🆕 Новые ({len(new_tasks)})',
-          f'🔄 В работе ({len(work_tasks)})',
-          f'✅ Завершенные ({len(done_tasks)})',
-      ])
+# Форма добавления новой задачи
+with st.expander("➕ Добавить новую задачу"):
+    with st.form("add_task_form", clear_on_submit=True):
+        new_task_title = st.text_input("Название задачи")
+        submitted = st.form_submit_button("Создать стикер")
+        
+        if submitted and new_task_title.strip():
+            st.session_state.tasks["Новая"].append(f"📌 {new_task_title.strip()}")
+            st.rerun()
 
-      def render_task_card(row):
-        t_id = row['ID']
-        t_title = row['Тема']
-        t_desc = row['Описание']
-        t_execs = row['Исполнители']
-        t_status = row['Статус']
-        t_urgency = row['Срочность']
-        t_img = row['Изображения Base64']
-        t_date = row['Дата создания']
+# --- КАНБАН ДОСКА (DRAG & DROP) ---
+# Формируем структуру данных для компонента
+original_structure = [
+    {"header": "🆕 Новая", "items": st.session_state.tasks["Новая"]},
+    {"header": "⚙️ В работе", "items": st.session_state.tasks["В работе"]},
+    {"header": "✅ Завершена", "items": st.session_state.tasks["Завершена"]}
+]
 
-        is_urgent = t_urgency == 'Срочно'
-        badge_html = (
-            f"<span class='urgent-badge'>🔥 {t_urgency}</span>"
-            if is_urgent
-            else f"<span class='normal-badge'>📌 {t_urgency}</span>"
-        )
-        bubbles_html = render_executor_bubbles(t_execs)
+# Отображаем интерактивные колонки
+sorted_structure = sort_items(
+    original_structure,
+    multi_containers=True,
+    direction="vertical",
+    key="kanban_board"
+)
 
-        with st.expander(f"#{t_id} | {t_title}", expanded=False):
-          col_info, col_edit_btn = st.columns([3, 1])
-
-          with col_info:
-            st.markdown(f"**Срочность:** {badge_html}", unsafe_allow_html=True)
-            st.markdown("**Исполнители:**", unsafe_allow_html=True)
-            st.markdown(bubbles_html, unsafe_allow_html=True)
-            st.caption(f"Дата создания: {t_date}")
-
-          with col_edit_btn:
-            if st.button('✏️ Редактировать', key=f'btn_modal_edit_{t_id}', use_container_width=True):
-              modal_edit_task(row)
-
-          st.divider()
-
-          if t_desc:
-            st.markdown("**Описание:**")
-            st.markdown(t_desc)
-
-          if t_img:
-            st.write('')
-            st.image(t_img, caption='Прикрепленное изображение', width=350)
-
-          st.divider()
-
-          c_sel, c_sav = st.columns([2, 1])
-          with c_sel:
-            new_st = st.selectbox(
-                'Быстрая смена статуса:',
-                ['Новая', 'В работе', 'Завершена'],
-                index=['Новая', 'В работе', 'Завершена'].index(t_status) if t_status in ['Новая', 'В работе', 'Завершена'] else 0,
-                key=f'status_sel_{t_id}',
-            )
-          with c_sav:
-            st.write('')
-            st.write('')
-            if st.button('Сохранить статус', key=f'btn_save_status_{t_id}'):
-              tasks_df.loc[tasks_df['ID'] == t_id, 'Статус'] = new_st
-              tasks_df.loc[tasks_df['ID'] == t_id, 'Дата обновления'] = datetime.datetime.now().strftime('%d.%m.%Y %H:%M')
-              if save_all_tasks(tasks_df):
-                st.success('Статус задачи сохранен!')
-                st.rerun()
-
-      with t_tab1:
-        if new_tasks.empty:
-          st.info('Новых задач нет.')
-        else:
-          for _, task_row in new_tasks.iterrows():
-            render_task_card(task_row)
-
-      with t_tab2:
-        if work_tasks.empty:
-          st.info('Задач в работе нет.')
-        else:
-          for _, task_row in work_tasks.iterrows():
-            render_task_card(task_row)
-
-      with t_tab3:
-        if done_tasks.empty:
-          st.info('Завершенных задач нет.')
-        else:
-          for _, task_row in done_tasks.iterrows():
-            render_task_card(task_row)
+# Синхронизируем изменения после перетягивания
+if sorted_structure:
+    st.session_state.tasks["Новая"] = sorted_structure[0]["items"]
+    st.session_state.tasks["В работе"] = sorted_structure[1]["items"]
+    st.session_state.tasks["Завершена"] = sorted_structure[2]["items"]
 
 # ==========================================
 # ВКЛАДКА 2: ОТКРЫТИЕ ГРУПП
