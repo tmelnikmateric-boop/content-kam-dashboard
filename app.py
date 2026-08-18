@@ -2216,9 +2216,7 @@ with main_tab2:
   else:
     st.warning("Не удалось загрузить данные из таблицы.")
 # ==========================================
-st.set_page_config(
-    page_title="Панель управления отдела контента", layout="wide"
-)
+
 
 st.markdown(
     """
