@@ -2159,27 +2159,7 @@ def save_groups_data(df_to_save):
   except Exception as e:
     st.error(f"Ошибка сохранения: {e}")
     return False
-with st.expander('📦 Массовое добавление групп на открытие', expanded=False):
-  with st.form('bulk_add_groups_form', clear_on_submit=True):
-    groups_input = st.text_area(
-        'Список групп (вводите каждую с новой строки или через запятую):',
-        placeholder='Интерьерный свет\nУличные светильники\nТрековые системы, Светодиодные ленты',
-        height=160,
-    )
 
-    col1, col2 = st.columns([2, 1])
-    with col1:
-      st.caption('💡 Дубликаты и пустые строки отфильтруются автоматически.')
-    with col2:
-      btn_submit_bulk = st.form_submit_button('➕ Добавить все группы', use_container_width=True)
-
-    if btn_submit_bulk:
-      success, message = bulk_add_groups(groups_input)
-      if success:
-        st.success(message)
-        st.rerun()
-      else:
-        st.error(message)
 
 @st.dialog("✏️ Редактирование / Добавление группы", width="large")
 def group_editor_dialog(row_data, row_index, full_df, dict_materik, dict_palas):
@@ -2322,7 +2302,27 @@ def group_editor_dialog(row_data, row_index, full_df, dict_materik, dict_palas):
       if save_groups_data(df_updated):
         st.success("Данные успешно сохранены!")
         st.rerun()
+with st.expander('📦 Массовое добавление групп на открытие', expanded=False):
+  with st.form('bulk_add_groups_form', clear_on_submit=True):
+    groups_input = st.text_area(
+        'Список групп (вводите каждую с новой строки или через запятую):',
+        placeholder='Интерьерный свет\nУличные светильники\nТрековые системы, Светодиодные ленты',
+        height=160,
+    )
 
+    col1, col2 = st.columns([2, 1])
+    with col1:
+      st.caption('💡 Дубликаты и пустые строки отфильтруются автоматически.')
+    with col2:
+      btn_submit_bulk = st.form_submit_button('➕ Добавить все группы', use_container_width=True)
+
+    if btn_submit_bulk:
+      success, message = bulk_add_groups(groups_input)
+      if success:
+        st.success(message)
+        st.rerun()
+      else:
+        st.error(message)
 
 @st.dialog("📌 Порядок расположения групп на сайте", width="large")
 def show_group_order_dialog():
