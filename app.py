@@ -460,7 +460,26 @@ def add_contact_row(new_row_dict):
     st.error(f'Ошибка сохранения контакта: {e}')
     return False
 
+def save_contacts_data(df):
+  """Сохранение и перезапись списка контактов поставщиков в Google Таблицу."""
+  try:
+    gc = get_gspread_client()
+    sh = gc.open_by_url(SPREADSHEET_URL)
+    try:
+      worksheet = sh.worksheet(CONTACTS_SHEET_NAME)
+    except gspread.WorksheetNotFound:
+      worksheet = sh.add_worksheet(title=CONTACTS_SHEET_NAME, rows='1000', cols='10')
 
+    df_to_save = df[CONTACT_COLUMNS].fillna('').astype(str)
+    data_to_write = [CONTACT_COLUMNS] + df_to_save.values.tolist()
+
+    worksheet.clear()
+    worksheet.update(range_name='A1', values=data_to_write)
+    return True
+  except Exception as e:
+    st.error(f'Ошибка сохранения контактов: {e}')
+    return False
+      
 def load_raw_new_products():
   try:
     gc = get_gspread_client()
@@ -1139,9 +1158,9 @@ def modal_contacts():
     if search_query.strip():
       q = search_query.lower()
       mask = contacts_df.apply(lambda row: row.astype(str).str.lower().str.contains(q).any(), axis=1)
-      filtered_contacts = contacts_df[mask]
+      filtered_contacts = contacts_df[mask].copy()
     else:
-      filtered_contacts = contacts_df
+      filtered_contacts = contacts_df.copy()
 
     column_configuration = {
         'Производитель': st.column_config.TextColumn('Производитель', width='medium'),
@@ -1152,17 +1171,31 @@ def modal_contacts():
         'Примечание': st.column_config.TextColumn('Примечание', width='large'),
     }
 
-    st.dataframe(
+    st.caption('✏️ Вы можете редактировать значения прямо в таблице. После внесения изменений нажмите кнопку ниже.')
+
+    edited_df = st.data_editor(
         filtered_contacts,
         use_container_width=True,
         hide_index=True,
         column_config=column_configuration,
-        height=480,
+        height=380,
+        num_rows='dynamic',
+        key='contacts_editor',
     )
+
+    if st.button('💾 Сохранить изменения в контактах', type='primary', use_container_width=True):
+      if search_query.strip():
+        contacts_df.loc[filtered_contacts.index] = edited_df.values
+        full_to_save = contacts_df
+      else:
+        full_to_save = edited_df
+
+      if save_contacts_data(full_to_save):
+        st.success('Изменения успешно сохранены в Google Таблицу!')
+        st.rerun()
   else:
     st.info('Контакты пока не добавлены.')
-
-
+      
 import io
 
 @st.dialog('📦 Новые товары')
