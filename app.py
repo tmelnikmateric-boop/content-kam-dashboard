@@ -459,7 +459,37 @@ def add_contact_row(new_row_dict):
   except Exception as e:
     st.error(f'Ошибка сохранения контакта: {e}')
     return False
+def bulk_add_groups(raw_text, sheet_name="Группы"):
+  """Парсит введенный текст, очищает от пробелов/дублей и добавляет группы в Google Таблицу."""
+  if not raw_text.strip():
+    return False, 'Поле ввода пустое!'
 
+  # Разбиваем по переносам строк и запятым
+  raw_list = raw_text.replace(';', '\n').replace(',', '\n').split('\n')
+  cleaned_groups = [g.strip() for g in raw_list if g.strip()]
+
+  if not cleaned_groups:
+    return False, 'Не удалось распознать ни одной группы.'
+
+  # Убираем дубликаты с сохранением порядка
+  unique_groups = list(dict.fromkeys(cleaned_groups))
+
+  try:
+    gc = get_gspread_client()
+    sh = gc.open_by_url(SPREADSHEET_URL)
+    try:
+      worksheet = sh.worksheet(sheet_name)
+    except gspread.WorksheetNotFound:
+      worksheet = sh.add_worksheet(title=sheet_name, rows='1000', cols='5')
+
+    # Формируем строки для отправки (каждая группа на новой строке)
+    rows_to_append = [[group, 'На открытие'] for group in unique_groups]
+    worksheet.append_rows(rows_to_append)
+
+    return True, f'Успешно добавлено групп: {len(unique_groups)}'
+  except Exception as e:
+    return False, f'Ошибка записи в таблицу: {e}'
+      
 def save_contacts_data(df):
   """Сохранение и перезапись списка контактов поставщиков в Google Таблицу."""
   try:
@@ -2129,7 +2159,27 @@ def save_groups_data(df_to_save):
   except Exception as e:
     st.error(f"Ошибка сохранения: {e}")
     return False
+with st.expander('📦 Массовое добавление групп на открытие', expanded=False):
+  with st.form('bulk_add_groups_form', clear_on_submit=True):
+    groups_input = st.text_area(
+        'Список групп (вводите каждую с новой строки или через запятую):',
+        placeholder='Интерьерный свет\nУличные светильники\nТрековые системы, Светодиодные ленты',
+        height=160,
+    )
 
+    col1, col2 = st.columns([2, 1])
+    with col1:
+      st.caption('💡 Дубликаты и пустые строки отфильтруются автоматически.')
+    with col2:
+      btn_submit_bulk = st.form_submit_button('➕ Добавить все группы', use_container_width=True)
+
+    if btn_submit_bulk:
+      success, message = bulk_add_groups(groups_input)
+      if success:
+        st.success(message)
+        st.rerun()
+      else:
+        st.error(message)
 
 @st.dialog("✏️ Редактирование / Добавление группы", width="large")
 def group_editor_dialog(row_data, row_index, full_df, dict_materik, dict_palas):
